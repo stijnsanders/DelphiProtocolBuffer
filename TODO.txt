@@ -1,0 +1,7 @@
+TODO
+
+- [deprecated]
+- documentation
+- more testing
+- something better than SetLength(R,Length(R)+1);
+- use interface references
