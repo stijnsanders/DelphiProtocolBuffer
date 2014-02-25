@@ -23,7 +23,7 @@ type
     function GenerateImplementation(p:TProtocolBufferParser):string; virtual;
   public
     Parent:TProdBufMessageDescriptor;
-    NextKey:integer;
+    NextKey,ExtensionsLo,ExtensionsHi:integer;
     Forwarded:boolean;
     constructor Create(const Name:string);
     procedure AddMember(Quant,TypeNr:integer;
@@ -135,9 +135,13 @@ var
   Keyword:string;
 
   procedure SkipWhiteSpace;
+  var
+    b:boolean;
   begin
-    while (CodeI<=CodeL) and (Code[CodeI]<=' ') do
+    b:=true;
+    while b or ((CodeI<=CodeL) and (Code[CodeI]<=' ')) do
      begin
+      b:=false;
       while (CodeI<=CodeL) and (Code[CodeI]<=' ') do
        begin
         if (Code[CodeI]=#10) then
@@ -155,13 +159,14 @@ var
         inc(CodeI);
        end;
       //TODO: support /* */ ?
-      if (CodeI<CodeL) and (Code[CodeI]='/') and (Code[CodeI]='//') then
+      if (CodeI<CodeL) and (Code[CodeI]='/') and (Code[CodeI+1]='/') then
        begin
         //skip comment to EOL
         while (CodeI<=CodeL)
           and (Code[CodeI]<>#13) and (Code[CodeI]<>#10) do
           inc(CodeI);
         inc(CodeI);
+        b:=true;
        end;
      end;
   end;
@@ -249,6 +254,7 @@ begin
       //TODO: package
       //TODO: import
       //TODO: option
+      //TODO: extend
       if not NextKeyword then
         R('Message identifier expected');
       Expect('{');
@@ -322,6 +328,20 @@ begin
         Expect('{');
         //push message
         MainLoop:=MainLoop_NestedMessage;
+       end
+      else
+      if Keyword='extensions' then
+       begin
+        //extensions
+        //TODO: if 'extend' then not allowed on extend!
+        if (Msg.ExtensionsLo<>0) then R('Extensions range already set');
+        Msg.ExtensionsLo:=NextInt;
+        if not NextKeyword then R('Expected "to"');
+        Msg.ExtensionsHi:=NextInt;
+        if (Msg.ExtensionsLo=0) or (Msg.ExtensionsHi=0)
+          or (Msg.ExtensionsHi<Msg.ExtensionsLo) then
+            R('Invalid extensions range');
+        Expect(';');
        end
       else
        begin
@@ -408,6 +428,7 @@ begin
                 if (Msg.NextKey>=kFirstReservedNumber)
                   and (Msg.NextKey<=kLastReservedNumber) then
                   R('Reserved key value '+IntToStr(Msg.NextKey));
+                //TODO: if extend then if Msg.ExtensionsLo<=x<=Msg.ExtensionsHi
                 Msg.AddMember(Quant,TypeNr,FieldName,TypeName,DefaultValue);
 
                 TypeNr:=0;
@@ -499,6 +520,8 @@ begin
   Parent:=nil;
   NextKey:=1;
   Forwarded:=false;
+  ExtensionsLo:=0;
+  ExtensionsHi:=0;
 end;
 
 procedure TProdBufMessageDescriptor.AddMember(Quant,TypeNr:integer;
@@ -976,7 +999,10 @@ begin
     else
      begin
       k:=FMembers[i].Key;
-      Result:=Result+FMembers[i].Name+' = '+IntToStr(k);
+      if k>100000 then
+        Result:=Result+FMembers[i].Name+' = $'+IntToHex(k,8)
+      else
+        Result:=Result+FMembers[i].Name+' = '+IntToStr(k);
      end;
     inc(k);
    end;
