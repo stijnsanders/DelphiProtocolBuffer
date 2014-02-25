@@ -59,7 +59,8 @@ begin
            begin
             InputFN:=s;
             OutputFN:=ChangeFileExt(s,'.pas');
-            if UnitName='' then UnitName:=ChangeFileExt(s,'');
+            if UnitName='' then
+              UnitName:=ChangeFileExt(ExtractFileName(s),'');
            end
           else
            begin
