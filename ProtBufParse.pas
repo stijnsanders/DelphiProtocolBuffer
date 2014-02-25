@@ -24,7 +24,7 @@ type
   public
     Parent:TProdBufMessageDescriptor;
     NextKey,ExtensionsLo,ExtensionsHi:integer;
-    Forwarded:boolean;
+    Forwarded,Extending:boolean;
     constructor Create(const Name:string);
     procedure AddMember(Quant,TypeNr:integer;
       const Name,TypeName,DefaultValue:string);
@@ -39,7 +39,7 @@ type
 
   TProtocolBufferParser=class(TObject)
   private
-    FUnitName, FPrefix:string;
+    FUnitName, FPrefix, FPackageName:string;
     FMsgDesc:array of TProdBufMessageDescriptor;
     FMsgDescIndex,FMsgDescSize:integer;
     procedure AddMsgDesc(x:TProdBufMessageDescriptor);
@@ -49,7 +49,7 @@ type
   public
     constructor Create(const UnitName, Prefix:string);
     destructor Destroy; override;
-    procedure Parse(const Code:string);
+    procedure Parse(const FilePath, RelPath:string);
     function GenerateUnit:string;
     property DescriptorCount: integer read FMsgDescIndex;
   end;
@@ -96,6 +96,8 @@ const
 
 implementation
 
+uses Classes;
+
 { TProtocolBufferParser }
 
 constructor TProtocolBufferParser.Create(const UnitName, Prefix: string);
@@ -103,6 +105,7 @@ begin
   inherited Create;
   FUnitName:=UnitName;
   FPrefix:=Prefix;
+  FPackageName:='';
   FMsgDescIndex:=0;
   FMsgDescSize:=0;
 end;
@@ -129,10 +132,25 @@ begin
   inc(FMsgDescIndex);
 end;
 
-procedure TProtocolBufferParser.Parse(const Code: string);
+procedure TProtocolBufferParser.Parse(const FilePath, RelPath: string);
 var
   Line,CodeL,CodeI,CodeJ,CodeI_EOL:integer;
-  Keyword:string;
+  Code,Keyword:string;
+
+  procedure LoadCode;
+  var
+    f:TFileStream;
+  begin
+    f:=TFileStream.Create(FilePath,fmOpenRead or fmShareDenyWrite);
+    try
+      //TODO: UTF-8? UTF-16?
+      CodeL:=f.Size;
+      SetLength(Code,CodeL);
+      if f.Read(Code[1],CodeL)<>CodeL then RaiseLastOSError;
+    finally
+      f.Free;
+    end;
+  end;
 
   procedure SkipWhiteSpace;
   var
@@ -171,13 +189,32 @@ var
      end;
   end;
 
+  procedure R(const Msg:string);
+    function ReturnAddr: pointer;
+    asm
+      mov eax,[ebp+4]
+    end;
+  begin
+    raise EProtocolBufferParseError.CreateFmt(
+      '%s, line %d pos %d',[Msg,Line,CodeI-CodeI_EOL]) at ReturnAddr;
+  end;
+
+  procedure Expect(x:char);
+  begin
+    SkipWhiteSpace;
+    if (CodeI<=CodeL) and (Code[CodeI]=x) then
+      inc(CodeI)
+    else
+      R('Expected "'+x+'"');
+  end;
+
   function NextKeyword:boolean;
   begin
     SkipWhiteSpace;
     CodeJ:=CodeI;
     //while (CodeJ<=CodeL) and (Code[CodeJ]>' ') do inc(CodeJ);
     while (CodeJ<=CodeL)
-      and (Code[CodeJ] in ['A'..'Z','a'..'z','0'..'9','_']) do
+      and (Code[CodeJ] in ['A'..'Z','a'..'z','0'..'9','_','.']) do
       inc(CodeJ);
     Keyword:=Copy(Code,CodeI,CodeJ-CodeI);
     Result:=CodeJ>CodeI;
@@ -209,23 +246,26 @@ var
      end;
   end;
 
-  procedure R(const Msg:string);
-    function ReturnAddr: pointer;
-    asm
-      mov eax,[ebp+4]
-    end;
+  function NextStr:string;
   begin
-    raise EProtocolBufferParseError.CreateFmt(
-      '%s, line %d pos %d',[Msg,Line,CodeI-CodeI_EOL]) at ReturnAddr;
-  end;
-
-  procedure Expect(x:char);
-  begin
-    SkipWhiteSpace;
-    if (CodeI<=CodeL) and (Code[CodeI]=x) then
+    Expect('"');
+    Result:='';
+    while (CodeI<=CodeL) and (Code[CodeI]<>'"') do
+     begin
+      if (Code[CodeI]='\') and (CodeI<CodeL) then
+       begin
+        inc(CodeI);
+        Result:=Result+Code[CodeI];
+       end
+      else
+        Result:=Result+Code[CodeI];//TODO: more Copy's!
+      inc(CodeI);
+     end;
+    //Expect('"');
+    if (CodeI<=CodeL) and (Code[CodeI]='"') then
       inc(CodeI)
     else
-      R('Expected "'+x+'"');
+      R('Expected end of string quotes');
   end;
 
 const
@@ -237,6 +277,7 @@ var
   MainLoop,Quant,TypeNr:integer;
   Msg,Msg1:TProdBufMessageDescriptor;
 begin
+  LoadCode;
   CodeL:=Length(Code);
   CodeI:=1;
   CodeI_EOL:=0;
@@ -247,16 +288,44 @@ begin
 
   while (MainLoop<>MainLoop_NewMessage) or NextKeyword do
    begin
+
+    //root level
+    if (Msg=nil) and (MainLoop=MainLoop_NewMessage) then
+      while (CodeI<=CodeL) and (Keyword<>'message') and (Keyword<>'extend') do
+       begin
+        if Keyword='package' then
+         begin
+          if FPackageName<>'' then R('Package name was already set.');
+          if NextKeyword then FPackageName:=Keyword else R('Package name expected;');
+          Expect(';');
+          //TODO: separate descriptors!!!
+         end
+        else
+        if Keyword='import' then
+         begin
+          Parse(RelPath+StringReplace(NextStr,'/','\',[rfReplaceAll]),RelPath);
+          Expect(';');
+         end
+        else
+          R('Unexpected keyword "'+Keyword+'"');
+        NextKeyword;//for remainder of loop
+       end;
+
     if MainLoop=MainLoop_NewMessage then
      begin
-      if Keyword<>'message' then
-        R('Unexpected keyword "'+Keyword+'", expected "message"');
-      //TODO: package
-      //TODO: import
+      if (Keyword<>'message') and (Keyword<>'extend') then
+        R('Unexpected keyword "'+Keyword+'", expected "message" or "extend"');
       //TODO: option
-      //TODO: extend
-      if not NextKeyword then
-        R('Message identifier expected');
+      if Keyword='extend' then
+       begin
+        if not NextKeyword then R('Extend identifier expected');
+        Msg:=MsgDescByName(Keyword);
+        //Msg.Extending:=true;
+        Msg.NextKey:=Msg.ExtensionsLo;//assert<>0
+        MainLoop:=MainLoop_ContinueMessage;
+       end
+      else
+        if not NextKeyword then R('Message identifier expected');
       Expect('{');
      end;
 
@@ -333,8 +402,8 @@ begin
       if Keyword='extensions' then
        begin
         //extensions
-        //TODO: if 'extend' then not allowed on extend!
         if (Msg.ExtensionsLo<>0) then R('Extensions range already set');
+        if Msg.Extending then R('Can''t set extensions range when already extending');
         Msg.ExtensionsLo:=NextInt;
         if not NextKeyword then R('Expected "to"');
         Msg.ExtensionsHi:=NextInt;
@@ -428,7 +497,10 @@ begin
                 if (Msg.NextKey>=kFirstReservedNumber)
                   and (Msg.NextKey<=kLastReservedNumber) then
                   R('Reserved key value '+IntToStr(Msg.NextKey));
-                //TODO: if extend then if Msg.ExtensionsLo<=x<=Msg.ExtensionsHi
+                if Msg.Extending and ((Msg.NextKey<Msg.ExtensionsLo) or
+                  (Msg.NextKey>Msg.ExtensionsHi)) then
+                  R('Key value outside of extensions range '+IntToStr(Msg.NextKey));
+
                 Msg.AddMember(Quant,TypeNr,FieldName,TypeName,DefaultValue);
 
                 TypeNr:=0;
@@ -520,6 +592,7 @@ begin
   Parent:=nil;
   NextKey:=1;
   Forwarded:=false;
+  Extending:=false;
   ExtensionsLo:=0;
   ExtensionsHi:=0;
 end;

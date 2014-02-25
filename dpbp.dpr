@@ -10,7 +10,7 @@ uses
 
 var
   p:TProtocolBufferParser;
-  s,t,UnitName,Prefix,InputFN,OutputFN:string;
+  s,t,UnitName,Prefix,InputFN,OutputFN,RelPath:string;
   i,l:integer;
   f:TFileStream;
 begin
@@ -20,7 +20,8 @@ begin
      begin
       writeln('dbpb: Delphi Protocol Buffer Parser');
       writeln('Usage:');
-      writeln('  dbpb [-p<TypePrefix>] [-u<UnitName>] <inputfile> [<outputfile>]');
+      writeln('  dbpb [-p<TypePrefix>] [-u<UnitName>] [-i<ImportPath>]'+
+        ' <inputfile> [<outputfile>]');
      end
     else
      begin
@@ -29,6 +30,7 @@ begin
       UnitName:='';
       InputFN:='';
       OutputFN:='';
+      RelPath:='';
       i:=1;
       while (i<=l) do
        begin
@@ -46,6 +48,7 @@ begin
           case s[2] of
             'p','P':Prefix:=t;
             'u','U':UnitName:=t;
+            'i','I':RelPath:=t;
             //TODO: more flags
             else raise Exception.Create('Unknown option "'+s+'"'); 
           end;
@@ -65,20 +68,17 @@ begin
          end;
        end;
 
+      if RelPath='' then
+        RelPath:=ExtractFilePath(InputFN)
+      else
+        RelPath:=IncludeTrailingPathDelimiter(RelPath);
+
       p:=TProtocolBufferParser.Create(UnitName,Prefix);
       try
 
         //TODO: multiple input files
         writeln('Parsing '+InputFN);
-        f:=TFileStream.Create(InputFN,fmOpenRead or fmShareDenyWrite);
-        try
-          l:=f.Size;
-          SetLength(s,l);
-          if f.Read(s[1],l)<>l then RaiseLastOSError;
-        finally
-          f.Free;
-        end;
-        p.Parse(s);
+        p.Parse(InputFN,RelPath);
 
         writeln(IntToStr(p.DescriptorCount)+' descriptors');
 
