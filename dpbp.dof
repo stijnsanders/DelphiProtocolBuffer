@@ -100,7 +100,7 @@ Conditionals=
 DebugSourceDirs=
 UsePackages=0
 [Parameters]
-RunParams=D:\Data\2014\RethinkWire\ql2_extensions.proto
+RunParams=-fPnEf D:\Data\2014\RethinkWire\ql2.proto
 HostApplication=
 Launcher=
 UseLauncher=0

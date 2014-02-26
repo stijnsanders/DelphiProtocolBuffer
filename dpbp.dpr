@@ -11,8 +11,10 @@ uses
 var
   p:TProtocolBufferParser;
   s,t,UnitName,Prefix,InputFN,OutputFN,RelPath:string;
-  i,l:integer;
+  i,j,l,l1:integer;
   f:TFileStream;
+  ff:TProtocolBufferParserFlag;
+  Flags:TProtocolBufferParserFlags;
 begin
   try
     l:=ParamCount;
@@ -20,8 +22,20 @@ begin
      begin
       writeln('dbpb: Delphi Protocol Buffer Parser');
       writeln('Usage:');
-      writeln('  dbpb [-p<TypePrefix>] [-u<UnitName>] [-i<ImportPath>]'+
-        ' <inputfile> [<outputfile>]');
+      writeln('  dbpb');
+      writeln('    [-p<TypePrefix>]');
+      writeln('    [-u<UnitName>]');
+      writeln('    [-i<ImportPath>]');
+      writeln('    [-f<Flags>]');
+      writeln('    <inputfile>');
+      writeln('    [<outputfile>]');
+      writeln('Flags:');
+      ff:=TProtocolBufferParserFlag(0);
+      while ff<>pbpf_Unknown do
+       begin
+        writeln('  '+ProtocolBufferParserFlagName[ff]);
+        inc(ff);
+       end;
      end
     else
      begin
@@ -31,6 +45,7 @@ begin
       InputFN:='';
       OutputFN:='';
       RelPath:='';
+      Flags:=[];
       i:=1;
       while (i<=l) do
        begin
@@ -49,6 +64,24 @@ begin
             'p','P':Prefix:=t;
             'u','U':UnitName:=t;
             'i','I':RelPath:=t;
+            'f','F':
+             begin
+              l1:=Length(t);
+              j:=1;
+              while (j<l1) do
+               begin
+                ff:=TProtocolBufferParserFlag(0);
+                while (ff<>pbpf_Unknown) and (t[j]+t[j+1]<>
+                  Copy(ProtocolBufferParserFlagName[ff],1,2)) do inc(ff);
+                if ff=pbpf_Unknown then
+                  raise Exception.Create('Unknown flag "'+Copy(t,j,2)+'"')
+                else
+                  Include(Flags,ff);
+                inc(j,2);
+               end;
+              if j=l1 then
+                raise Exception.Create('Incomplete flag "'+t[j]+'"');
+             end;
             //TODO: more flags
             else raise Exception.Create('Unknown option "'+s+'"'); 
           end;
@@ -84,7 +117,7 @@ begin
         writeln(IntToStr(p.DescriptorCount)+' descriptors');
 
         writeln('Writing '+OutputFN);
-        s:=p.GenerateUnit;
+        s:=p.GenerateUnit(Flags);
         f:=TFileStream.Create(OutputFN,fmCreate);
         try
           f.Write(s[1],Length(s));

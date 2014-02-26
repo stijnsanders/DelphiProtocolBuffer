@@ -35,6 +35,7 @@ type
     function ReadBool(Stream: TStream): boolean;
     function ReadEnum(Stream: TStream): cardinal;
     procedure ReadMessage(Stream: TStream; Value: TProtocolBufferMessage);
+    procedure ReadBlock(Stream: TSTream; var Data; Length: cardinal);
 
     //use from ReadValue
     procedure WriteSInt(Stream: TStream; Key: TProtocolBufferKey;
@@ -57,6 +58,8 @@ type
       const Value: WideString); overload;
     procedure WriteMessage(Stream: TStream; Key: TProtocolBufferKey;
       Value: TProtocolBufferMessage);
+    procedure WriteBlock(Stream: TStream; Key: TProtocolBufferKey;
+      var Data; Length: cardinal);
 
   public
     constructor Create;
@@ -322,10 +325,17 @@ begin
     l:=m.Position;
     _WriteVarInt(Stream,l);
     m.Position:=0;
-    if Stream.Write(m.Memory^,l)<>l then _WriteError;
+    if cardinal(Stream.Write(m.Memory^,l))<>l then _WriteError;
   finally
     m.Free;
   end;
+end;
+
+procedure TProtocolBufferMessage.WriteBlock(Stream: TStream;
+  Key: TProtocolBufferKey; var Data; Length: cardinal);
+begin
+  _WriteVarInt(Stream,(Key shl 3) or 2);
+  if cardinal(Stream.Write(Data,Length))<>Length then _WriteError;
 end;
 
 procedure TProtocolBufferMessage.ReadBytes(Stream: TStream;
@@ -409,6 +419,13 @@ begin
   if not _ReadVarInt(Stream,l) then _ReadError;
   Value.LoadFromStream(Stream);
   if Stream.Position<>p+l then _ReadError;//Stream.Position:=p+l;?
+  FDidRead:=true;
+end;
+
+procedure TProtocolBufferMessage.ReadBlock(Stream: TSTream; var Data;
+  Length: cardinal);
+begin
+  if cardinal(Stream.Read(Data,Length))<>Length then _ReadError;
   FDidRead:=true;
 end;
 
