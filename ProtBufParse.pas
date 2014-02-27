@@ -39,7 +39,8 @@ type
   protected
     function GenerateInterface(p:TProtocolBufferParser;
       Flags:TProtocolBufferParserFlags):string; virtual;
-    function GenerateImplementation(p:TProtocolBufferParser):string; virtual;
+    function GenerateImplementation(p:TProtocolBufferParser;
+      Flags:TProtocolBufferParserFlags):string; virtual;
   public
     Parent:TProdBufMessageDescriptor;
     NextKey,ExtensionsLo,ExtensionsHi:integer;
@@ -55,7 +56,8 @@ type
   protected
     function GenerateInterface(p:TProtocolBufferParser;
       Flags:TProtocolBufferParserFlags):string; override;
-    function GenerateImplementation(p:TProtocolBufferParser):string; override;
+    function GenerateImplementation(p:TProtocolBufferParser;
+      Flags:TProtocolBufferParserFlags):string; override;
   end;
 
   TProtocolBufferParser=class(TObject)
@@ -617,11 +619,20 @@ begin
   for MsgI:=0 to FMsgDescIndex-1 do
    begin
     //TODO: determine dependancy-safe order?
-    if (pbpfPrependNameParent in Flags)
-      and not(FMsgDesc[MsgI] is TProdBufEnumDescriptor)
-      and (FMsgDesc[MsgI].Parent<>nil) then
-      FMsgDesc[MsgI].FPasName:=
-        FMsgDesc[MsgI].Parent.Name+'_'+FMsgDesc[MsgI].FPasName;
+    if FMsgDesc[MsgI] is TProdBufEnumDescriptor then
+     begin
+      if (pbpfPrependEnumName in Flags) 
+        and (FMsgDesc[MsgI].Parent<>nil) then
+        FMsgDesc[MsgI].FPasName:=
+          FMsgDesc[MsgI].Parent.Name+'_'+FMsgDesc[MsgI].FPasName;
+     end
+    else
+     begin
+      if (pbpfPrependNameParent in Flags)
+        and (FMsgDesc[MsgI].Parent<>nil) then
+        FMsgDesc[MsgI].FPasName:=
+          FMsgDesc[MsgI].Parent.Name+'_'+FMsgDesc[MsgI].FPasName;
+     end;
    end;
 
   //interface
@@ -636,7 +647,7 @@ begin
   Result:=Result+'implementation'#13#10#13#10'uses SysUtils;'#13#10;
 
   for MsgI:=0 to FMsgDescIndex-1 do
-    Result:=Result+FMsgDesc[MsgI].GenerateImplementation(Self);
+    Result:=Result+FMsgDesc[MsgI].GenerateImplementation(Self,Flags);
 
   Result:=Result+'end.'#13#10;
 end;
@@ -654,13 +665,58 @@ begin
     raise Exception.Create('Message descriptor "'+Name+'" not found');
 end;
 
+function IsReservedWord(x:string):boolean;
+const
+  ResWordsCount=65;
+  ResWords:array[0..ResWordsCount-1] of string=(
+    'and', 'array', 'as', 'asm',
+    'begin', 'case', 'class', 'const',
+    'constructor', 'destructor', 'dispinterface', 'div',
+    'do', 'downto', 'else', 'end',
+    'except', 'exports', 'file', 'finalization',
+    'finally', 'for', 'function', 'goto',
+    'if', 'implementation', 'in', 'inherited',
+    'initialization', 'inline', 'interface', 'is',
+    'label', 'library', 'mod', 'nil',
+    'not', 'object', 'of', 'or',
+    'out', 'packed', 'procedure', 'program',
+    'property', 'raise', 'record', 'repeat',
+    'resourcestring', 'set', 'shl', 'shr',
+    'string', 'then', 'threadvar', 'to',
+    'try', 'type', 'unit', 'until',
+    'uses', 'var', 'while', 'with',
+    'xor'
+  );
+  ResWordMaxLength:array['A'..'Z'] of byte=(5,5,11,13,7,12,4,0,14,0,0,7,3,3,6,9,0,14,6,9,5,3,5,3,0,0);
+var
+  c:char;
+  y:string;
+  i:integer;
+begin
+  //assert x<>''
+  c:=char(UpCase(x[1]));
+  //skip anything longer than longest word
+  if not(c in ['A'..'Z']) or (Length(x)>ResWordMaxLength[c]) then
+    Result:=false
+  else
+   begin
+    y:=LowerCase(x);
+    i:=0;
+    while (i<ResWordsCount) and (y<>ResWords[i]) do inc(i);
+    Result:=i<ResWordsCount;
+   end;
+end;
+
 { TProdBufMessageDescriptor }
 
 constructor TProdBufMessageDescriptor.Create(const Name: string);
 begin
   inherited Create;
   FName:=Name;
-  FPasName:=Name;//TODO: reserved words!
+  if IsReservedWord(Name) then
+    FPasName:=Name+'_'
+  else
+    FPasName:=Name;
   FMembersIndex:=0;
   FMembersCount:=0;
   Parent:=nil;
@@ -708,8 +764,7 @@ begin
   FWireFlags:=0;
   for i:=0 to FMembersIndex-1 do
    begin
-    //TODO: check all reserved words?
-    if LowerCase(FMembers[i].Name)='type' then
+    if IsReservedWord(FMembers[i].Name) then
       FMembers[i].Name:=FMembers[i].Name+'_';
     if FMembers[i].Key>FHighKey then
       FHighKey:=FMembers[i].Key;
@@ -734,14 +789,25 @@ begin
       TypeNr__typeByName:
        begin
         m:=p.MsgDescByName(FMembers[i].TypeName);
+        FMembers[i].PascalType:=m.PasName;
         if m is TProdBufEnumDescriptor then
-          FMembers[i].TypeNr:=TypeNr_enum
+         begin
+          FMembers[i].TypeNr:=TypeNr_enum;
+          if FMembers[i].DefaultValue<>'' then
+           begin
+            if pbpfPrependEnumName in Flags then
+              FMembers[i].DefaultValue:=
+                m.PasName+'_'+FMembers[i].DefaultValue;
+           end;
+         end
         else
          begin
           FMembers[i].TypeNr:=TypeNr_msg;
           FWireFlags:=FWireFlags or WireFlag_Msg;
           if FMembers[i].Quant>=Quant_Repeated then
-            FWireFlags:=FWireFlags or (WireFlag_Msg shl 8);
+            FWireFlags:=FWireFlags or (WireFlag_Msg shl 8)
+          else
+            FWireFlags:=FWireFlags or WireFlag_Default;
           if not m.Forwarded then
            begin
             m.Forwarded:=true;
@@ -829,7 +895,7 @@ begin
 end;
 
 function TProdBufMessageDescriptor.GenerateImplementation(
-  p:TProtocolBufferParser): string;
+  p:TProtocolBufferParser; Flags:TProtocolBufferParserFlags): string;
 var
   i:integer;
   s:string;
@@ -839,9 +905,20 @@ begin
    begin
     Result:=Result+'procedure '+p.Prefix+FPasName+'.SetDefaultValues;'#13#10+
       'begin'#13#10;
-    for i:=0 to FMembersIndex-1 do if FMembers[i].DefaultValue<>'' then
-      Result:=Result+'  F'+FMembers[i].Name+
-        ' := '+FMembers[i].DefaultValue+';'#13#10;//TODO: look-up/check value?
+    for i:=0 to FMembersIndex-1 do
+      if (FMembers[i].TypeNr=TypeNr_Msg)
+        and (FMembers[i].Quant<Quant_Repeated) then
+        Result:=Result+'  F'+FMembers[i].Name+' := nil;'#13#10
+      else
+      if FMembers[i].DefaultValue<>'' then
+        case FMembers[i].TypeNr of
+          //TypeNr_enum: assert DefaultValue corrected when needed
+          TypeNr_string:Result:=Result+'  F'+FMembers[i].Name+
+            ' := '''+StringReplace(FMembers[i].DefaultValue,
+              '''','''''',[rfReplaceAll])+''';'#13#10;
+          else Result:=Result+'  F'+FMembers[i].Name+
+            ' := '+FMembers[i].DefaultValue+';'#13#10;
+        end;
     Result:=Result+'end;'#13#10#13#10;
    end;
   if (FWireFlags and WireFlag_Msg)<>0 then
@@ -851,11 +928,12 @@ begin
       Result:=Result+'var'#13#10'  i: integer;'#13#10;
     Result:=Result+'begin'#13#10;
     for i:=0 to FMembersIndex-1 do
-      if FMembers[i].Quant<Quant_Repeated then
-        Result:=Result+'  FreeAndNil(F'+FMembers[i].Name+');'#13#10
-      else
-        Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10
-          +'    FreeAndNil(F'+FMembers[i].Name+'[i]);'#13#10;
+      if FMembers[i].TypeNr=TypeNr_msg then
+        if FMembers[i].Quant<Quant_Repeated then
+          Result:=Result+'  FreeAndNil(F'+FMembers[i].Name+');'#13#10
+        else
+          Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10
+            +'    FreeAndNil(F'+FMembers[i].Name+'[i]);'#13#10;
     Result:=Result+'end;'#13#10#13#10;
    end;
   if (FWireFlags and WireFlag_VarInt)<>0 then
@@ -954,13 +1032,19 @@ begin
             ': ReadBytes(Stream, F'+FMembers[i].Name+');'#13#10;
         TypeNr_msg:
           if FMembers[i].Quant<Quant_Repeated then
-            Result:=Result+'    '+IntToStr(FMembers[i].Key)+
-              ': ReadMessage(Stream, F'+FMembers[i].Name+');'#13#10
+            Result:=Result+'    '+IntToStr(FMembers[i].Key)+':'#13#10+
+              '      begin'#13#10+
+              '        F'+FMembers[i].Name+':='+
+              FMembers[i].PascalType+'.Create;'#13#10+
+              '        ReadMessage(Stream, F'+FMembers[i].Name+');'#13#10+
+              '      end;'#13#10
           else
             Result:=Result+'    '+IntToStr(FMembers[i].Key)+':'#13#10+
               '      begin'#13#10+
               '        l := Length(F'+FMembers[i].Name+');'#13#10+
               '        SetLength(F'+FMembers[i].Name+', l+1);'#13#10+
+              '        F'+FMembers[i].Name+'[l]:='+
+              FMembers[i].PascalType+'.Create;'#13#10+
               '        ReadMessage(Stream, F'+FMembers[i].Name+'[l]);'#13#10+
               '      end;'#13#10;
       end;
@@ -1020,25 +1104,44 @@ begin
     case FMembers[i].TypeNr of
       TypeNr_int32,TypeNr_int64,TypeNr_uint32,TypeNr_uint64:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
-            ', F'+FMembers[i].Name+');'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+'[i]);'#13#10;
       TypeNr_sint32,TypeNr_sint64:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteSInt(Stream, '+IntToStr(FMembers[i].Key)+
-            ', F'+FMembers[i].Name+');'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  WriteSInt(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    WriteSInt(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteSInt(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+'[i]);'#13#10;
       TypeNr_bool:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  if F'+FMembers[i].Name+
-            ' then WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 1)'#13#10+
-            '    else WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  if F'+FMembers[i].Name+
+              ' then WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 1)'#13#10+
+              '    else WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    if F'+FMembers[i].Name+
+              ' then WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 1)'#13#10+
+              '      else WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    if F'+FMembers[i].Name+
@@ -1046,41 +1149,67 @@ begin
             '      else WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10;
       TypeNr_string:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteStr(Stream, '+IntToStr(FMembers[i].Key)+
-            ', F'+FMembers[i].Name+');'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  WriteStr(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    WriteStr(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteStr(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+'[i]);'#13#10;
       TypeNr_bytes:
         //assert FMembers[i].Quant<Quant_Repeated
+        //assert FMembers[i].DefaultValue=''
         Result:=Result+'  WriteBytes(Stream, '+IntToStr(FMembers[i].Key)+
           ', F'+FMembers[i].Name+');'#13#10;
       TypeNr_fixed32,TypeNr_sfixed32,TypeNr_float:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
-            ', F'+FMembers[i].Name+', 4);'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+', 4);'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+', 4);'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+'[i], 4);'#13#10;
       TypeNr_fixed64,TypeNr_sfixed64,TypeNr_double:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
-            ', F'+FMembers[i].Name+', 8);'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+', 8);'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+', 8);'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteBlock(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+'[i], 8);'#13#10;
       TypeNr_enum:
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
-            ', cardinal(F'+FMembers[i].Name+'));'#13#10
+          if FMembers[i].DefaultValue='' then
+            Result:=Result+'  WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
+              ', cardinal(F'+FMembers[i].Name+'));'#13#10
+          else
+            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
+              FMembers[i].DefaultValue+' then'#13#10+
+              '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
+              ', -cardinal(F'+FMembers[i].Name+'));'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
             ', cardinal(F'+FMembers[i].Name+'[i]));'#13#10;
       TypeNr_msg:
+        //assert FMembers[i].DefaultValue=''
         if FMembers[i].Quant<Quant_Repeated then
           Result:=Result+'  WriteMessage(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+');'#13#10
@@ -1131,14 +1260,10 @@ function TProdBufEnumDescriptor.GenerateInterface(p:TProtocolBufferParser;
 var
   i,k:integer;
   b:boolean;
-  n,m:string;
+  m:string;
 begin
   //TODO: switch between enum, const
-  if pbpfPrependEnumName in Flags then
-    n:=Parent.Name+'_'+FPasName
-  else
-    n:=FPasName;
-  Result:='  '+p.Prefix+n+' = ('#13#10'    ';
+  Result:='  '+p.Prefix+FPasName+' = ('#13#10'    ';
   b:=true;
   k:=0;
   //TODO: switch prefix enum items with enum name?
@@ -1146,7 +1271,7 @@ begin
    begin
     if b then b:=false else Result:=Result+','#13#10'    ';
     m:=FMembers[i].Name;
-    if pbpfPrependEnumFields in Flags then m:=n+'_'+m;//:=FName+'_'+m;?
+    if pbpfPrependEnumFields in Flags then m:=FPasName+'_'+m;//:=FName+'_'+m;?
     if k=FMembers[i].Key then
      begin
       Result:=Result+m;
@@ -1164,7 +1289,8 @@ begin
   Result:=Result+#13#10'  );'#13#10#13#10;
 end;
 
-function TProdBufEnumDescriptor.GenerateImplementation(p:TProtocolBufferParser): string;
+function TProdBufEnumDescriptor.GenerateImplementation(
+  p:TProtocolBufferParser; Flags:TProtocolBufferParserFlags): string;
 begin
   Result:='';
 end;

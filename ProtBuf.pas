@@ -77,6 +77,7 @@ uses SysUtils, Variants;
 constructor TProtocolBufferMessage.Create;
 begin
   inherited;
+  SetDefaultValues;
   //
 end;
 
