@@ -5,3 +5,8 @@ TODO
 - more testing
 - something better than SetLength(R,Length(R)+1);
 - use interface references
+
+
+IDEA'S
+
+- generate SQL scripts

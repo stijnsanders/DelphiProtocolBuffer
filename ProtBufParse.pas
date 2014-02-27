@@ -68,7 +68,8 @@ type
     procedure AddMsgDesc(x:TProdBufMessageDescriptor);
     procedure InsertMsgDesc(x,before:TProdBufMessageDescriptor);
   protected
-    function MsgDescByName(const Name:string):TProdBufMessageDescriptor;
+    function MsgDescByName(OptParent: TProdBufMessageDescriptor;
+      const Name:string):TProdBufMessageDescriptor;
     property Prefix:string read FPrefix;
   public
     constructor Create(const UnitName, Prefix:string);
@@ -369,7 +370,7 @@ begin
       if Keyword='extend' then
        begin
         if not NextKeyword then R('Extend identifier expected');
-        Msg:=MsgDescByName(Keyword);
+        Msg:=MsgDescByName(nil,Keyword);
         Msg.Extending:=true;
         Msg.NextKey:=Msg.ExtensionsLo;//assert<>0
         MainLoop:=MainLoop_ContinueMessage;
@@ -644,7 +645,7 @@ begin
     Result:=Result+FMsgDesc[MsgI].GenerateInterface(Self,Flags);
 
   //implementation
-  Result:=Result+'implementation'#13#10#13#10'uses SysUtils;'#13#10;
+  Result:=Result+'implementation'#13#10#13#10'uses SysUtils;'#13#10#13#10;
 
   for MsgI:=0 to FMsgDescIndex-1 do
     Result:=Result+FMsgDesc[MsgI].GenerateImplementation(Self,Flags);
@@ -653,13 +654,25 @@ begin
 end;
 
 function TProtocolBufferParser.MsgDescByName(
+  OptParent: TProdBufMessageDescriptor;
   const Name:string):TProdBufMessageDescriptor;
 var
   i:integer;
 begin
-  //TODO: ascend over .Parent?
-  i:=0;
-  while (i<FMsgDescIndex) and (FMsgDesc[i].Name<>Name) do inc(i);
+  if OptParent=nil then i:=FMsgDescIndex else
+   begin
+    //search with Parent set
+    i:=0;
+    //TODO: ascend over .Parent(s)?
+    while (i<FMsgDescIndex) and ((FMsgDesc[i].Parent<>OptParent)
+      or (FMsgDesc[i].Name<>Name)) do inc(i);
+   end;
+  if i=FMsgDescIndex then
+   begin
+    //not found, search disregarding parent
+    i:=0;
+    while (i<FMsgDescIndex) and (FMsgDesc[i].Name<>Name) do inc(i);
+   end;
   if i<FMsgDescIndex then Result:=FMsgDesc[i] else
     //Result:=nil;
     raise Exception.Create('Message descriptor "'+Name+'" not found');
@@ -788,8 +801,8 @@ begin
       //TypeNr_msg:
       TypeNr__typeByName:
        begin
-        m:=p.MsgDescByName(FMembers[i].TypeName);
-        FMembers[i].PascalType:=m.PasName;
+        m:=p.MsgDescByName(Self,FMembers[i].TypeName);
+        FMembers[i].PascalType:=p.Prefix+m.PasName;
         if m is TProdBufEnumDescriptor then
          begin
           FMembers[i].TypeNr:=TypeNr_enum;
@@ -815,7 +828,6 @@ begin
               ' = class; //forward'#13#10#13#10;
            end;
          end;
-        FMembers[i].PascalType:=p.Prefix+m.PasName;
        end;
       else FMembers[i].PascalType:='???';
     end;
