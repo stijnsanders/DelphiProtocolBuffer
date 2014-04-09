@@ -1228,10 +1228,16 @@ begin
       TypeNr_msg:
         //assert FMembers[i].DefaultValue=''
         if FMembers[i].Quant<Quant_Repeated then
-          Result:=Result+'  WriteMessage(Stream, '+IntToStr(FMembers[i].Key)+
-            ', F'+FMembers[i].Name+');'#13#10
+          if FMembers[i].Quant=Quant_Optional then
+            Result:=Result+'  if F'+FMembers[i].Name+'<>nil then'#13#10+
+              '    WriteMessage(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
+          else
+            Result:=Result+'  WriteMessage(Stream, '+IntToStr(FMembers[i].Key)+
+              ', F'+FMembers[i].Name+');'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
+            //'    if F'+FMembers[i].Name+'<>nil then'#13#10+
             '    WriteMessage(Stream, '+IntToStr(FMembers[i].Key)+
             ', F'+FMembers[i].Name+'[i]);'#13#10;
     end;

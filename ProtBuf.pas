@@ -68,7 +68,7 @@ type
   public
     constructor Create;
 
-    procedure LoadFromStream(Stream: TStream);
+    procedure LoadFromStream(Stream: TStream; Length: int64);
     procedure SaveToStream(Stream: TStream);
   end;
 
@@ -95,6 +95,7 @@ var
   b:byte;
   l:integer;
 begin
+  b:=0;//default
   l:=Stream.Read(b,1);
   Value:=b and $7F;
   while (l<>0) and ((b and $80)<>0) do
@@ -110,6 +111,7 @@ var
   b:byte;
   l:integer;
 begin
+  b:=0;//default
   l:=Stream.Read(b,1);
   Value:=b and $7F;
   while (l<>0) and ((b and $80)<>0) do
@@ -153,14 +155,17 @@ begin
   if Stream.Write(b,1)<>1 then _WriteError;
 end;
 
-procedure TProtocolBufferMessage.LoadFromStream(Stream: TStream);
+procedure TProtocolBufferMessage.LoadFromStream(Stream: TStream;
+  Length: int64);
 var
   i:cardinal;
   k:TProtocolBufferKey;
-  j:int64;
+  j,p:int64;
 begin
   //TODO: use some byte buffer
-  while _ReadVarInt(Stream,i) do
+  //TODO: increase counter on read instead of Stream.Position here
+  p:=Stream.Position+Length;
+  while (Stream.Position<p) and _ReadVarInt(Stream,i) do
    begin
     k:=TProtocolBufferKey(i shr 3);
     FDidRead:=false;//see read methods
@@ -287,7 +292,8 @@ begin
   l:=Length(Value);
   _WriteVarInt(Stream,(Key shl 3) or 2);
   _WriteVarInt(Stream,l);
-  if cardinal(Stream.Write(Value[1],l))<>l then _WriteError;
+  if l<>0 then
+    if cardinal(Stream.Write(Value[1],l))<>l then _WriteError;
 end;
 
 procedure TProtocolBufferMessage.WriteStr(Stream: TStream;
@@ -300,7 +306,8 @@ begin
   l:=Length(x);
   _WriteVarInt(Stream,(Key shl 3) or 2);
   _WriteVarInt(Stream,l);
-  if cardinal(Stream.Write(x[1],l))<>l then _WriteError;
+  if l<>0 then
+    if cardinal(Stream.Write(x[1],l))<>l then _WriteError;
 end;
 
 procedure TProtocolBufferMessage.WriteStrA(Stream: TStream;
@@ -313,7 +320,8 @@ begin
   l:=Length(x);
   _WriteVarInt(Stream,(Key shl 3) or 2);
   _WriteVarInt(Stream,l);
-  if cardinal(Stream.Write(x[1],l))<>l then _WriteError;
+  if l<>0 then
+    if cardinal(Stream.Write(x[1],l))<>l then _WriteError;
 end;
 
 procedure TProtocolBufferMessage.WriteMessage(Stream: TStream;
@@ -330,7 +338,8 @@ begin
     l:=m.Position;
     _WriteVarInt(Stream,l);
     m.Position:=0;
-    if cardinal(Stream.Write(m.Memory^,l))<>l then _WriteError;
+    if l<>0 then
+      if cardinal(Stream.Write(m.Memory^,l))<>l then _WriteError;
   finally
     m.Free;
   end;
@@ -340,7 +349,8 @@ procedure TProtocolBufferMessage.WriteBlock(Stream: TStream;
   Key: TProtocolBufferKey; var Data; Length: cardinal);
 begin
   _WriteVarInt(Stream,(Key shl 3) or 2);
-  if cardinal(Stream.Write(Data,Length))<>Length then _WriteError;
+  if Length<>0 then
+    if cardinal(Stream.Write(Data,Length))<>Length then _WriteError;
 end;
 
 procedure TProtocolBufferMessage.ReadBytes(Stream: TStream;
@@ -350,7 +360,8 @@ var
 begin
   if not _ReadVarInt(Stream,l) then _ReadError;
   SetLength(Value,l);
-  if cardinal(Stream.Read(Value[0],l))<>l then _ReadError;
+  if l<>0 then
+    if cardinal(Stream.Read(Value[0],l))<>l then _ReadError;
   FDidRead:=true;
 end;
 
@@ -360,7 +371,8 @@ var
 begin
   if not _ReadVarInt(Stream,l) then _ReadError;
   SetLength(Value,l);
-  if cardinal(Stream.Read(Value[1],l))<>l then _ReadError;
+  if l<>0 then
+    if cardinal(Stream.Read(Value[1],l))<>l then _ReadError;
   FDidRead:=true;
 end;
 
@@ -418,19 +430,20 @@ end;
 procedure TProtocolBufferMessage.ReadMessage(Stream: TStream;
   Value: TProtocolBufferMessage);
 var
-  p,l:int64;
+  l:int64;
 begin
-  p:=Stream.Position;
   if not _ReadVarInt(Stream,l) then _ReadError;
-  Value.LoadFromStream(Stream);
-  if Stream.Position<>p+l then _ReadError;//Stream.Position:=p+l;?
+  //p:=Stream.Position;
+  Value.LoadFromStream(Stream,l);
+  //if Stream.Position<>p+l then _ReadError;
   FDidRead:=true;
 end;
 
 procedure TProtocolBufferMessage.ReadBlock(Stream: TSTream; var Data;
   Length: cardinal);
 begin
-  if cardinal(Stream.Read(Data,Length))<>Length then _ReadError;
+  if Length<>0 then
+    if cardinal(Stream.Read(Data,Length))<>Length then _ReadError;
   FDidRead:=true;
 end;
 
