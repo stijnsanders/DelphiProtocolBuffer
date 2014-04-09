@@ -9,6 +9,7 @@ type
     pbpfPrependNameParent,
     pbpfPrependEnumName,
     pbpfPrependEnumFields,
+    pbpfDebugData,
     //add new here
     pbpf_Unknown);
 
@@ -17,6 +18,7 @@ const
     'Pn: prepend with parent name',
     'En: prepend enumeration name with parent',
     'Ef: prepend enumeration field with name',
+    'Dd: include debug data',
     //add new here
     '');
 
@@ -615,6 +617,9 @@ begin
       ProtocolBufferParserFlagName[f]+#13#10;
     inc(f);
    end;
+
+  if not(pbpfDebugData in Flags) then
+    Result:=Result+#13#10'{$D-}'#13#10'{$L-}'#13#10'{$Y-}'#13#10;
 
   //first pass
   for MsgI:=0 to FMsgDescIndex-1 do

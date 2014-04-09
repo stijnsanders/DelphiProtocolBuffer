@@ -100,7 +100,7 @@ Conditionals=
 DebugSourceDirs=
 UsePackages=0
 [Parameters]
-RunParams=-fPnEf D:\Data\2014\RethinkWire\ql2.proto
+RunParams=-fPnEfDd D:\Data\2014\RethinkWire\ql2.proto
 HostApplication=
 Launcher=
 UseLauncher=0
@@ -111,7 +111,7 @@ AutoIncBuild=0
 MajorVer=1
 MinorVer=0
 Release=1
-Build=0
+Build=1
 Debug=0
 PreRelease=0
 Special=0
@@ -122,7 +122,7 @@ CodePage=1252
 [Version Info Keys]
 CompanyName=
 FileDescription=Delphi ProtocolBuffer Parser
-FileVersion=1.0.1.0
+FileVersion=1.0.1.1
 InternalName=dpbp
 LegalCopyright=see COPYING
 LegalTrademarks=
