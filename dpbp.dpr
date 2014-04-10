@@ -10,9 +10,10 @@ uses
 
 var
   p:TProtocolBufferParser;
-  s,t,UnitName,Prefix,InputFN,OutputFN,RelPath:string;
+  s,t,InputFN,OutputFN,RelPath:string;
   i,j,l,l1:integer;
   f:TFileStream;
+  fv:TProtocolBufferParserValue;
   ff:TProtocolBufferParserFlag;
   Flags:TProtocolBufferParserFlags;
 begin
@@ -23,9 +24,16 @@ begin
       writeln('dbpb: Delphi Protocol Buffer Parser');
       writeln('Usage:');
       writeln('  dbpb');
-      writeln('    [-p<TypePrefix>]');
-      writeln('    [-u<UnitName>]');
-      writeln('    [-i<ImportPath>]');
+      fv:=TProtocolBufferParserValue(0);
+      while fv<>pbpv_Unknown do
+       begin
+        if ProtocolBufferParserValueDefaults[fv]<>'' then
+          writeln('    [-'+ProtocolBufferParserValueName[fv]+'] (default:"'+
+            ProtocolBufferParserValueDefaults[fv]+'")')
+        else
+          writeln('    [-'+ProtocolBufferParserValueName[fv]+']');
+        inc(fv);
+       end;
       writeln('    [-f<Flags>]');
       writeln('    <inputfile>');
       writeln('    [<outputfile>]');
@@ -39,33 +47,28 @@ begin
      end
     else
      begin
-      //defaults
-      Prefix:='T';
-      UnitName:='';
-      InputFN:='';
-      OutputFN:='';
-      RelPath:='';
-      Flags:=[];
-      i:=1;
-      while (i<=l) do
-       begin
-        s:=ParamStr(i);
-        inc(i);
-        if (Length(s)>1) and (s[1]='-') then
+      p:=TProtocolBufferParser.Create;
+      try
+        InputFN:='';
+        OutputFN:='';
+        Flags:=[];
+        i:=1;
+        while (i<=l) do
          begin
-          if (Length(s)=2) and (i<=l) then
+          s:=ParamStr(i);
+          inc(i);
+          if (Length(s)>1) and (s[1]='-') then
            begin
-            t:=ParamStr(i);
-            inc(i);
-           end
-          else
-            t:=Copy(s,3,Length(s)-2);
-          case s[2] of
-            'p','P':Prefix:=t;
-            'u','U':UnitName:=t;
-            'i','I':RelPath:=t;
-            'f','F':
+            if (Length(s)=2) and (i<=l) then
              begin
+              t:=ParamStr(i);
+              inc(i);
+             end
+            else
+              t:=Copy(s,3,Length(s)-2);
+            if s[2] in ['f','F'] then
+             begin
+              //flags
               l1:=Length(t);
               j:=1;
               while (j<l1) do
@@ -81,38 +84,41 @@ begin
                end;
               if j=l1 then
                 raise Exception.Create('Incomplete flag "'+t[j]+'"');
+             end
+            else
+             begin
+              //values
+              fv:=TProtocolBufferParserValue(0);
+              while (fv<>pbpv_Unknown) and
+                (s[2]<>ProtocolBufferParserValueName[fv][1]) do inc(fv);
+              if fv=pbpv_Unknown then
+                raise Exception.Create('Unknown option "'+s+'"')
+              else
+                p.Values[fv]:=t;
              end;
-            //TODO: more flags
-            else raise Exception.Create('Unknown option "'+s+'"'); 
-          end;
-         end
-        else
-         begin
-          if InputFN='' then
-           begin
-            InputFN:=s;
-            OutputFN:=ChangeFileExt(s,'.pas');
-            if UnitName='' then
-              UnitName:=ChangeFileExt(ExtractFileName(s),'');
            end
           else
            begin
-            OutputFN:=s;
+            if InputFN='' then
+             begin
+              InputFN:=s;
+              OutputFN:=ChangeFileExt(s,'.pas');
+             end
+            else
+             begin
+              OutputFN:=s;
+             end;
            end;
          end;
-       end;
 
-      if RelPath='' then
-        RelPath:=ExtractFilePath(InputFN)
-      else
-        RelPath:=IncludeTrailingPathDelimiter(RelPath);
-
-      p:=TProtocolBufferParser.Create(UnitName,Prefix);
-      try
+        if RelPath='' then
+          RelPath:=ExtractFilePath(InputFN)
+        else
+          RelPath:=IncludeTrailingPathDelimiter(RelPath);
 
         //TODO: multiple input files
         writeln('Parsing '+InputFN);
-        p.Parse(InputFN,RelPath);
+        p.Parse(InputFN);
 
         writeln(IntToStr(p.DescriptorCount)+' descriptors');
 
