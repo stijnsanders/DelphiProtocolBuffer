@@ -1309,7 +1309,8 @@ begin
         'begin'#13#10+
         '  Result := Length(F'+FMembers[i].Name+');'#13#10+
         'end;'#13#10#13#10+
-        'procedure '+p.Values[pbpvTypePrefix]+FPasName+'.Add'+FMembers[i].Name+
+        'procedure '+p.Values[pbpvTypePrefix]+FPasName+'.'+
+          p.Values[pbpvAddPrefix]+FMembers[i].Name+
           '('+s+'Value: '+FMembers[i].PascalType+');'#13#10+
         'var'#13#10+
         '  l: integer;'#13#10+
