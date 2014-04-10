@@ -891,9 +891,14 @@ begin
 
   for i:=0 to FMembersIndex-1 do
     if FMembers[i].Quant<Quant_Repeated then
+     begin
       Result:=Result+
         '    property '+FMembers[i].Name+': '+FMembers[i].PascalType+
-        ' read F'+FMembers[i].Name+' write F'+FMembers[i].Name+';'#13#10
+        ' read F'+FMembers[i].Name;
+      if FMembers[i].Quant=Quant_Optional then
+        Result:=Result+' write F'+FMembers[i].Name;
+      Result:=Result+';'#13#10;
+     end
     else
      begin
       if FMembers[i].TypeNr in [TypeNr_string,TypeNr_bytes] then
@@ -925,7 +930,11 @@ begin
     for i:=0 to FMembersIndex-1 do
       if (FMembers[i].TypeNr=TypeNr_Msg)
         and (FMembers[i].Quant<Quant_Repeated) then
-        Result:=Result+'  F'+FMembers[i].Name+' := nil;'#13#10
+        if FMembers[i].Quant=Quant_Optional then
+          Result:=Result+'  F'+FMembers[i].Name+' := nil;'#13#10
+        else
+          Result:=Result+'  F'+FMembers[i].Name+' := '+
+            FMembers[i].PascalType+'.Create;'#13#10
       else
       if FMembers[i].DefaultValue<>'' then
         case FMembers[i].TypeNr of
