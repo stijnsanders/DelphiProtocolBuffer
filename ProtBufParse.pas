@@ -3,7 +3,7 @@
 DelphiProtocolBuffer: ProtBufParse.pas
 
 Copyright 2014 Stijn Sanders
-Made available under terms described in file "COPYING"
+Made available under terms described in file "LICENSE"
 https://github.com/stijnsanders/DelphiProtocolBuffer
 
 }

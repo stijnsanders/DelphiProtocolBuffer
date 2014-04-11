@@ -1,3 +1,12 @@
+{
+
+DelphiProtocolBuffer: SelfVersion.pas
+
+Copyright 2014 Stijn Sanders
+Made available under terms described in file "LICENSE"
+https://github.com/stijnsanders/DelphiProtocolBuffer
+
+}
 unit SelfVersion;
 
 interface
