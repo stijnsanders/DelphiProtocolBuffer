@@ -1,3 +1,12 @@
+{
+
+DelphiProtocolBuffer: ProtBufParse.pas
+
+Copyright 2014 Stijn Sanders
+Made available under terms described in file "COPYING"
+https://github.com/stijnsanders/DelphiProtocolBuffer
+
+}
 unit ProtBufParse;
 
 interface

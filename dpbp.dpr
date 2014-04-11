@@ -1,3 +1,12 @@
+{
+
+DelphiProtocolBuffer: dpbp.dpr
+
+Copyright 2014 Stijn Sanders
+Made available under terms described in file "COPYING"
+https://github.com/stijnsanders/DelphiProtocolBuffer
+
+}
 program dpbp;
 
 uses
