@@ -12,7 +12,8 @@ program dpbp;
 uses
   SysUtils,
   Classes,
-  ProtBufParse in 'ProtBufParse.pas';
+  ProtBufParse in 'ProtBufParse.pas',
+  SelfVersion in 'SelfVersion.pas';
 
 {$APPTYPE CONSOLE}
 {$R *.res}
