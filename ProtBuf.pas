@@ -13,7 +13,6 @@ unit ProtBuf;
 
 {$D-}
 {$L-}
-{$Y-}
 
 interface
 
@@ -99,15 +98,17 @@ end;
 function _ReadVarInt(Stream: TStream; var Value: cardinal): boolean; overload;
 var
   b:byte;
-  l:integer;
+  i,l:integer;
 begin
   b:=0;//default
+  i:=0;
   l:=Stream.Read(b,1);
   Value:=b and $7F;
   while (l<>0) and ((b and $80)<>0) do
    begin
     l:=Stream.Read(b,1);
-    Value:=Value shl 7 or (b and $7F);
+    inc(i,7);
+    Value:=Value or ((b and $7F) shl i);
    end;
   Result:=l<>0;
 end;
@@ -115,15 +116,17 @@ end;
 function _ReadVarInt(Stream: TStream; var Value: int64): boolean; overload;
 var
   b:byte;
-  l:integer;
+  i,l:integer;
 begin
   b:=0;//default
+  i:=0;
   l:=Stream.Read(b,1);
   Value:=b and $7F;
   while (l<>0) and ((b and $80)<>0) do
    begin
     l:=Stream.Read(b,1);
-    Value:=Value shl 7 or (b and $7F);
+    inc(i,7);
+    Value:=Value or ((b and $7F) shl i);
    end;
   Result:=l<>0;
 end;
@@ -135,30 +138,32 @@ end;
 
 procedure _WriteVarInt(Stream: TStream; x: cardinal); overload;
 var
+  i:cardinal;
   b:byte;
 begin
-  while x>=$80 do
+  i:=0;
+  repeat inc(i,7) until (1 shl i)>=x;
+  while i<>0 do
    begin
-    b:=$80 or (x and $7F);
+    dec(i,7);
+    b:=(x shr i) and $7F;
     if Stream.Write(b,1)<>1 then _WriteError;
-    x:=x shr 7;
    end;
-  b:=x;
-  if Stream.Write(b,1)<>1 then _WriteError;
 end;
 
 procedure _WriteVarInt(Stream: TStream; x: int64); overload;
 var
+  i:int64;
   b:byte;
 begin
-  while x>=$80 do
+  i:=0;
+  repeat inc(i,7) until (1 shl i)>=x;
+  while i<>0 do
    begin
-    b:=$80 or (x and $7F);
+    dec(i,7);
+    b:=(x shr i) and $7F;
     if Stream.Write(b,1)<>1 then _WriteError;
-    x:=x shr 7;
    end;
-  b:=x;
-  if Stream.Write(b,1)<>1 then _WriteError;
 end;
 
 procedure TProtocolBufferMessage.LoadFromStream(Stream: TStream;

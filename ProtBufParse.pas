@@ -888,7 +888,6 @@ begin
         TypeNr_bool:FMembers[i].DefaultValue:='false';
         TypeNr_enum:FMembers[i].DefaultValue:=
           p.Values[pbpvTypePrefix]+FMembers[i].TypeName+'(0)';
-        TypeNr_string:FMembers[i].DefaultValue:='''''';
         TypeNr_fixed32,TypeNr_sfixed32,
         TypeNr_fixed64,TypeNr_sfixed64,
         TypeNr_float,TypeNr_double:
