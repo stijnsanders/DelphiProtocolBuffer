@@ -389,7 +389,7 @@ begin
         else
         if Keyword='import' then
          begin
-          Parse(Values[pbpvImportPath]+
+          Parse(IncludeTrailingPathDelimiter(Values[pbpvImportPath])+
             StringReplace(NextStr,'/','\',[rfReplaceAll]));
           Expect(';');
          end
@@ -663,7 +663,7 @@ begin
    end;
 
   if not(pbpfDebugData in Flags) then
-    Result:=Result+#13#10'{$D-}'#13#10'{$L-}'#13#10'{$Y-}'#13#10;
+    Result:=Result+#13#10'{$D-}'#13#10'{$L-}'#13#10;//'{$Y-}'#13#10;?
 
   //first pass
   for MsgI:=0 to FMsgDescIndex-1 do
@@ -880,6 +880,20 @@ begin
        end;
       else FMembers[i].PascalType:='???';
     end;
+    if (FMembers[i].Quant=Quant_Optional) and (FMembers[i].DefaultValue='') then
+      case FMembers[i].TypeNr of
+        TypeNr_int32,TypeNr_uint32,TypeNr_sint32,
+        TypeNr_int64,TypeNr_uint64,TypeNr_sint64:
+          FMembers[i].DefaultValue:='0';
+        TypeNr_bool:FMembers[i].DefaultValue:='false';
+        TypeNr_enum:FMembers[i].DefaultValue:=
+          p.Values[pbpvTypePrefix]+FMembers[i].TypeName+'(0)';
+        TypeNr_string:FMembers[i].DefaultValue:='''''';
+        TypeNr_fixed32,TypeNr_sfixed32,
+        TypeNr_fixed64,TypeNr_sfixed64,
+        TypeNr_float,TypeNr_double:
+          FMembers[i].DefaultValue:='0.0';
+      end;
     w:=FMembers[i].TypeNr shr 4;
     FWireFlags:=FWireFlags or (1 shl w);
     if FMembers[i].Quant>=Quant_Repeated then
@@ -1063,14 +1077,16 @@ begin
         TypeNr_enum:
           if FMembers[i].Quant<Quant_Repeated then
             Result:=Result+'    '+IntToStr(FMembers[i].Key)+
-              ': F'+FMembers[i].Name+' := T'+FMembers[i].TypeName+
+              ': F'+FMembers[i].Name+' := '+
+                p.Values[pbpvTypePrefix]+FMembers[i].TypeName+
                 '(ReadEnum(Stream));'#13#10
           else
             Result:=Result+'    '+IntToStr(FMembers[i].Key)+':'#13#10+
               '      begin'#13#10+
               '        l := Length(F'+FMembers[i].Name+');'#13#10+
               '        SetLength(F'+FMembers[i].Name+', l+1);'#13#10+
-              '        F'+FMembers[i].Name+'[l] := T'+FMembers[i].TypeName+
+              '        F'+FMembers[i].Name+'[l] := '+
+              p.Values[pbpvTypePrefix]+FMembers[i].TypeName+
               '(ReadEnum(Stream));'#13#10+
               '      end;'#13#10;
       end;
@@ -1274,7 +1290,7 @@ begin
             Result:=Result+'  if F'+FMembers[i].Name+'<>'+
               FMembers[i].DefaultValue+' then'#13#10+
               '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+
-              ', -cardinal(F'+FMembers[i].Name+'));'#13#10
+              ', cardinal(F'+FMembers[i].Name+'));'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+

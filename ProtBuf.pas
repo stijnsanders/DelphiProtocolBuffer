@@ -169,8 +169,11 @@ var
   j,p:int64;
 begin
   //TODO: use some byte buffer
-  //TODO: increase counter on read instead of Stream.Position here
-  p:=Stream.Position+Length;
+  if Length=0 then
+    p:=Stream.Size //raise? detect?
+  else
+    p:=Stream.Position+Length;
+  //TODO: increase counter on (all!) reads instead of Stream.Position here
   while (Stream.Position<p) and _ReadVarInt(Stream,i) do
    begin
     k:=TProtocolBufferKey(i shr 3);

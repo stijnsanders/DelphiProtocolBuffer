@@ -100,7 +100,7 @@ Conditionals=
 DebugSourceDirs=
 UsePackages=0
 [Parameters]
-RunParams=-fPnEfDd D:\Data\2014\TRethinkWire\ql2.proto
+RunParams=-fPnEf D:\Data\2014\TRethinkWire\ql2.proto
 HostApplication=
 Launcher=
 UseLauncher=0
