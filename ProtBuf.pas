@@ -204,7 +204,11 @@ begin
          end;
        end;
       3,4:raise Exception.Create('ProtBuf: groups are deprecated');
-      5:ReadFixed32(Stream,k);
+      5://fixed32
+       begin
+        ReadFixed32(Stream,k);
+        if not FDidRead then if Stream.Read(j,4)<>4 then _ReadError;
+       end;
       else
         raise Exception.Create('ProfBuf: unexpected wite type '+IntToHex(i,8));
     end;
