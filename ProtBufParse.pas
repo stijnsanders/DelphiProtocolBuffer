@@ -11,7 +11,7 @@ unit ProtBufParse;
 
 interface
 
-uses SysUtils;
+uses SysUtils, Classes;
 
 type
   TProtocolBufferParserValue=(
@@ -61,7 +61,7 @@ type
 
   TProtocolBufferParserFlags=set of TProtocolBufferParserFlag;
 
-  TProdBufMessageDescriptor=class(TObject)
+  TProtBufMessageDescriptor=class(TObject)
   private
     FName,FPasName:string;
     FMembers:array of record
@@ -76,17 +76,19 @@ type
     function GenerateImplementation(p:TProtocolBufferParser;
       Flags:TProtocolBufferParserFlags):string; virtual;
   public
-    Parent:TProdBufMessageDescriptor;
+    Parent:TProtBufMessageDescriptor;
     NextKey,ExtensionsLo,ExtensionsHi:integer;
     Forwarded,Extending:boolean;
     constructor Create(const Name:string);
     procedure AddMember(Quant,TypeNr:integer;
       const Name,TypeName,DefaultValue:string);
+    function MemberByKey(Key: integer; var Name: string;
+      var Quant, TypeNr: integer): boolean;
     property Name:string read FName;
     property PasName:string read FPasName;
   end;
 
-  TProdBufEnumDescriptor=class(TProdBufMessageDescriptor)
+  TProtBufEnumDescriptor=class(TProtBufMessageDescriptor)
   protected
     function GenerateInterface(p:TProtocolBufferParser;
       Flags:TProtocolBufferParserFlags):string; override;
@@ -97,18 +99,19 @@ type
   TProtocolBufferParser=class(TObject)
   private
     FPackageName,FUnitName:string;
-    FMsgDesc:array of TProdBufMessageDescriptor;
+    FMsgDesc:array of TProtBufMessageDescriptor;
     FMsgDescIndex,FMsgDescSize:integer;
-    procedure AddMsgDesc(x:TProdBufMessageDescriptor);
-    procedure InsertMsgDesc(x,before:TProdBufMessageDescriptor);
+    procedure AddMsgDesc(x:TProtBufMessageDescriptor);
+    procedure InsertMsgDesc(x,before:TProtBufMessageDescriptor);
   protected
-    function MsgDescByName(OptParent: TProdBufMessageDescriptor;
-      const Name:string):TProdBufMessageDescriptor;
+    function MsgDescByName(OptParent: TProtBufMessageDescriptor;
+      const Name:string):TProtBufMessageDescriptor;
   public
     Values:TProtocolBufferParserValues;
     constructor Create;
     destructor Destroy; override;
     procedure Parse(const FilePath:string);
+    procedure ListDescriptors(const List:TStrings);
     function GenerateUnit(Flags:TProtocolBufferParserFlags):string;
     property DescriptorCount: integer read FMsgDescIndex;
   end;
@@ -155,7 +158,7 @@ const
 
 implementation
 
-uses Classes, SelfVersion;
+uses SelfVersion;
 
 { TProtocolBufferParser }
 
@@ -179,7 +182,7 @@ begin
   inherited;
 end;
 
-procedure TProtocolBufferParser.AddMsgDesc(x: TProdBufMessageDescriptor);
+procedure TProtocolBufferParser.AddMsgDesc(x: TProtBufMessageDescriptor);
 begin
   //TODO: check unique name, (auto-enable pbpfPrependNameParent?)
   if FMsgDescIndex=FMsgDescSize then
@@ -192,7 +195,7 @@ begin
 end;
 
 procedure TProtocolBufferParser.InsertMsgDesc(x,
-  before: TProdBufMessageDescriptor);
+  before: TProtBufMessageDescriptor);
 var
   i,j:integer;
 begin
@@ -360,7 +363,7 @@ const
 var
   FieldName,TypeName,DefaultValue:string;
   MainLoop,Quant,TypeNr:integer;
-  Msg,Msg1:TProdBufMessageDescriptor;
+  Msg,Msg1:TProtBufMessageDescriptor;
 begin
   FUnitName:=ChangeFileExt(ExtractFileName(FilePath),'');
   LoadCode;
@@ -420,7 +423,7 @@ begin
     if MainLoop<>MainLoop_ContinueMessage then
      begin
       Msg1:=Msg;
-      Msg:=TProdBufMessageDescriptor.Create(Keyword);
+      Msg:=TProtBufMessageDescriptor.Create(Keyword);
       AddMsgDesc(Msg);
       Msg.Parent:=Msg1;
      end;
@@ -435,7 +438,7 @@ begin
         //enumeration
         if not NextKeyword then R('Enum identifier expected');
         Expect('{');
-        Msg1:=TProdBufEnumDescriptor.Create(Keyword);
+        Msg1:=TProtBufEnumDescriptor.Create(Keyword);
         InsertMsgDesc(Msg1,Msg);
         Msg1.Parent:=Msg;
         Msg1.NextKey:=0;
@@ -669,7 +672,7 @@ begin
   for MsgI:=0 to FMsgDescIndex-1 do
    begin
     //TODO: determine dependancy-safe order?
-    if FMsgDesc[MsgI] is TProdBufEnumDescriptor then
+    if FMsgDesc[MsgI] is TProtBufEnumDescriptor then
      begin
       if (pbpfPrependEnumName in Flags) 
         and (FMsgDesc[MsgI].Parent<>nil) then
@@ -703,8 +706,8 @@ begin
 end;
 
 function TProtocolBufferParser.MsgDescByName(
-  OptParent: TProdBufMessageDescriptor;
-  const Name:string):TProdBufMessageDescriptor;
+  OptParent: TProtBufMessageDescriptor;
+  const Name:string):TProtBufMessageDescriptor;
 var
   i:integer;
 begin
@@ -769,9 +772,19 @@ begin
    end;
 end;
 
-{ TProdBufMessageDescriptor }
+procedure TProtocolBufferParser.ListDescriptors(const List: TStrings);
+var
+  i:integer;
+begin
+  for i:=0 to FMsgDescIndex-1 do
+    //if not(FMsgDesc[i] is TProtBufEnumDescriptor) then
+    if FMsgDesc[i].Parent=nil then
+      List.AddObject(FMsgDesc[i].FName,FMsgDesc[i]);
+end;
 
-constructor TProdBufMessageDescriptor.Create(const Name: string);
+{ TProtBufMessageDescriptor }
+
+constructor TProtBufMessageDescriptor.Create(const Name: string);
 begin
   inherited Create;
   FName:=Name;
@@ -789,7 +802,7 @@ begin
   ExtensionsHi:=0;
 end;
 
-procedure TProdBufMessageDescriptor.AddMember(Quant,TypeNr:integer;
+procedure TProtBufMessageDescriptor.AddMember(Quant,TypeNr:integer;
   const Name,TypeName,DefaultValue:string);
 var
   i:integer;
@@ -814,11 +827,11 @@ begin
   inc(NextKey);
 end;
 
-function TProdBufMessageDescriptor.GenerateInterface(
+function TProtBufMessageDescriptor.GenerateInterface(
   p:TProtocolBufferParser; Flags:TProtocolBufferParserFlags): string;
 var
   i,w:integer;
-  m:TProdBufMessageDescriptor;
+  m:TProtBufMessageDescriptor;
   s:string;
 begin
   Result:='';
@@ -852,7 +865,7 @@ begin
        begin
         m:=p.MsgDescByName(Self,FMembers[i].TypeName);
         FMembers[i].PascalType:=p.Values[pbpvTypePrefix]+m.PasName;
-        if m is TProdBufEnumDescriptor then
+        if m is TProtBufEnumDescriptor then
          begin
           FMembers[i].TypeNr:=TypeNr_enum;
           if FMembers[i].DefaultValue<>'' then
@@ -974,7 +987,7 @@ begin
   Result:=Result+'  end;'#13#10#13#10;
 end;
 
-function TProdBufMessageDescriptor.GenerateImplementation(
+function TProtBufMessageDescriptor.GenerateImplementation(
   p:TProtocolBufferParser; Flags:TProtocolBufferParserFlags): string;
 var
   i:integer;
@@ -1346,9 +1359,25 @@ begin
    end;
 end;
 
-{ TProdBufEnumDescriptor }
+function TProtBufMessageDescriptor.MemberByKey(Key: integer;
+  var Name: string; var Quant, TypeNr: integer): boolean;
+var
+  i:integer;
+begin
+  i:=0;
+  while (i<FMembersIndex) and (FMembers[i].Key<>Key) do inc(i);
+  if i=FMembersIndex then Result:=false else
+   begin
+    Name:=FMembers[i].Name;
+    Quant:=FMembers[i].Quant;
+    TypeNr:=FMembers[i].TypeNr;
+    Result:=true;
+   end;
+end;
 
-function TProdBufEnumDescriptor.GenerateInterface(p:TProtocolBufferParser;
+{ TProtBufEnumDescriptor }
+
+function TProtBufEnumDescriptor.GenerateInterface(p:TProtocolBufferParser;
   Flags:TProtocolBufferParserFlags): string;
 var
   i,k:integer;
@@ -1382,7 +1411,7 @@ begin
   Result:=Result+#13#10'  );'#13#10#13#10;
 end;
 
-function TProdBufEnumDescriptor.GenerateImplementation(
+function TProtBufEnumDescriptor.GenerateImplementation(
   p:TProtocolBufferParser; Flags:TProtocolBufferParserFlags): string;
 begin
   Result:='';

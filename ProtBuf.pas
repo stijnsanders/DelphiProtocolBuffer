@@ -210,7 +210,7 @@ begin
         if not FDidRead then if Stream.Read(j,4)<>4 then _ReadError;
        end;
       else
-        raise Exception.Create('ProfBuf: unexpected wite type '+IntToHex(i,8));
+        raise Exception.Create('ProfBuf: unexpected wire type '+IntToHex(i,8));
     end;
    end;
 end;
