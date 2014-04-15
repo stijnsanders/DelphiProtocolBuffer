@@ -82,7 +82,7 @@ type
     constructor Create(const Name:string);
     procedure AddMember(Quant,TypeNr:integer;
       const Name,TypeName,DefaultValue:string);
-    function MemberByKey(Key: integer; var Name: string;
+    function MemberByKey(Key: integer; var FieldName, FieldType: string;
       var Quant, TypeNr: integer): boolean;
     property Name:string read FName;
     property PasName:string read FPasName;
@@ -103,14 +103,13 @@ type
     FMsgDescIndex,FMsgDescSize:integer;
     procedure AddMsgDesc(x:TProtBufMessageDescriptor);
     procedure InsertMsgDesc(x,before:TProtBufMessageDescriptor);
-  protected
-    function MsgDescByName(OptParent: TProtBufMessageDescriptor;
-      const Name:string):TProtBufMessageDescriptor;
   public
     Values:TProtocolBufferParserValues;
     constructor Create;
     destructor Destroy; override;
     procedure Parse(const FilePath:string);
+    function MsgDescByName(OptParent: TProtBufMessageDescriptor;
+      const Name:string):TProtBufMessageDescriptor;
     procedure ListDescriptors(const List:TStrings);
     function GenerateUnit(Flags:TProtocolBufferParserFlags):string;
     property DescriptorCount: integer read FMsgDescIndex;
@@ -410,6 +409,8 @@ begin
        begin
         if not NextKeyword then R('Extend identifier expected');
         Msg:=MsgDescByName(nil,Keyword);
+        if Msg=nil then
+          raise Exception.Create('Extend descriptor "'+Keyword+'" not found');
         Msg.Extending:=true;
         Msg.NextKey:=Msg.ExtensionsLo;//assert<>0
         MainLoop:=MainLoop_ContinueMessage;
@@ -725,9 +726,7 @@ begin
     i:=0;
     while (i<FMsgDescIndex) and (FMsgDesc[i].Name<>Name) do inc(i);
    end;
-  if i<FMsgDescIndex then Result:=FMsgDesc[i] else
-    //Result:=nil;
-    raise Exception.Create('Message descriptor "'+Name+'" not found');
+  if i<FMsgDescIndex then Result:=FMsgDesc[i] else Result:=nil;
 end;
 
 function IsReservedWord(x:string):boolean;
@@ -864,6 +863,8 @@ begin
       TypeNr__typeByName:
        begin
         m:=p.MsgDescByName(Self,FMembers[i].TypeName);
+        if m=nil then raise Exception.Create(
+          'Descriptor "'+FMembers[i].TypeName+'" not found');
         FMembers[i].PascalType:=p.Values[pbpvTypePrefix]+m.PasName;
         if m is TProtBufEnumDescriptor then
          begin
@@ -1236,11 +1237,12 @@ begin
               ' then WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 1)'#13#10+
               '    else WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10
           else
-            Result:=Result+'  if F'+FMembers[i].Name+'<>'+
-              FMembers[i].DefaultValue+' then'#13#10+
-              '    if F'+FMembers[i].Name+
-              ' then WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 1)'#13#10+
-              '      else WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10
+            if LowerCase(FMembers[i].DefaultValue)='true' then
+              Result:=Result+'  if not F'+FMembers[i].Name+' then'#13#10+
+                '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 0);'#13#10
+            else
+              Result:=Result+'  if F'+FMembers[i].Name+' then'#13#10+
+                '    WriteUInt(Stream, '+IntToStr(FMembers[i].Key)+', 1);'#13#10
         else
           Result:=Result+'  for i := 0 to Length(F'+FMembers[i].Name+')-1 do'#13#10+
             '    if F'+FMembers[i].Name+
@@ -1360,7 +1362,7 @@ begin
 end;
 
 function TProtBufMessageDescriptor.MemberByKey(Key: integer;
-  var Name: string; var Quant, TypeNr: integer): boolean;
+  var FieldName, FieldType: string; var Quant, TypeNr: integer): boolean;
 var
   i:integer;
 begin
@@ -1368,7 +1370,8 @@ begin
   while (i<FMembersIndex) and (FMembers[i].Key<>Key) do inc(i);
   if i=FMembersIndex then Result:=false else
    begin
-    Name:=FMembers[i].Name;
+    FieldName:=FMembers[i].Name;
+    FieldType:=FMembers[i].TypeName;
     Quant:=FMembers[i].Quant;
     TypeNr:=FMembers[i].TypeNr;
     Result:=true;
