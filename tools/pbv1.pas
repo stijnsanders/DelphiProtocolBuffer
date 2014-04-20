@@ -145,6 +145,9 @@ implementation
 { TfrmProtBufViewMain }
 
 procedure TfrmProtBufViewMain.DoCreate;
+var
+  i:integer;
+  fn:string;
 begin
   inherited;
   FDataFile:='';
@@ -152,7 +155,16 @@ begin
   FProtoFile:='';
   FProto:=TProtocolBufferParser.Create;
   case ParamCount of
-    1:LoadFile(ParamStr(1));
+    1:
+     begin
+      fn:=ParamStr(1);
+      i:=Length(fn);
+      while (i<>0) and (fn[i]<>'.') do dec(i);
+      if LowerCase(Copy(fn,i,Length(fn)-i+1))='.proto' then
+        LoadProto(fn)
+      else
+        LoadFile(fn);
+     end;
     2:
      begin
       LoadProto(ParamStr(1));
