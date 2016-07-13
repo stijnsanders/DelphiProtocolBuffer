@@ -2,7 +2,7 @@
 
 DelphiProtocolBuffer: ProtBufParse.pas
 
-Copyright 2014 Stijn Sanders
+Copyright 2014-2016 Stijn Sanders
 Made available under terms described in file "LICENSE"
 https://github.com/stijnsanders/DelphiProtocolBuffer
 
@@ -66,7 +66,7 @@ type
     FName,FPasName:string;
     FMembers:array of record
       Key,Quant,TypeNr:integer;
-      Name,TypeName,DefaultValue,PascalType:string;
+      Name,TypeName,DefaultValue,PascalType,OneOfName:string;
     end;
     FMembersIndex,FMembersCount,FHighKey:integer;
     FWireFlags:cardinal;
@@ -79,6 +79,7 @@ type
     Parent:TProtBufMessageDescriptor;
     NextKey,ExtensionsLo,ExtensionsHi:integer;
     Forwarded,Extending:boolean;
+    OneOfName:string;
     constructor Create(const Name:string);
     procedure AddMember(Quant,TypeNr:integer;
       const Name,TypeName,DefaultValue:string);
@@ -105,6 +106,7 @@ type
     procedure InsertMsgDesc(x,before:TProtBufMessageDescriptor);
   public
     Values:TProtocolBufferParserValues;
+    Options:TStringList;
     constructor Create;
     destructor Destroy; override;
     procedure Parse(const FilePath:string);
@@ -141,8 +143,9 @@ const
   TypeNr_sfixed64=$41;
   TypeNr_float=$32;
   TypeNr_double=$42;
-  //depends:enum/message
-  TypeNr__typeByName=$1;
+  //depends:enum/message/map
+  TypeNr__typeByName=$01;
+  TypeNr__map=$02;
 
   WireFlag_VarInt     = $002;// shl 1
   WireFlag_Len        = $004;// shl 2
@@ -169,6 +172,7 @@ begin
   FMsgDescIndex:=0;
   FMsgDescSize:=0;
   Values:=ProtocolBufferParserValueDefaults;
+  Options:=TStringList.Create;
 end;
 
 destructor TProtocolBufferParser.Destroy;
@@ -178,6 +182,7 @@ begin
     dec(FMsgDescIndex);
     FreeAndNil(FMsgDesc[FMsgDescIndex]);
    end;
+  Options.Free;
   inherited;
 end;
 
@@ -219,6 +224,11 @@ begin
   inc(FMsgDescIndex);
 end;
 
+function pd(const x:string):string;
+begin
+  if x='' then Result:='' else Result:=IncludeTrailingPathDelimiter(x);
+end;
+
 procedure TProtocolBufferParser.Parse(const FilePath: string);
 var
   Line,CodeL,CodeI,CodeJ,CodeI_EOL:integer;
@@ -258,7 +268,7 @@ var
           if (Code[CodeI]=#13) then
            begin
             inc(Line);
-            if (CodeI<CodeL) and (Code[CodeI]=#10) then inc(CodeI);
+            if (CodeI<CodeL) and (Code[CodeI+1]=#10) then inc(CodeI);
             CodeI_EOL:=CodeI;
            end;
         inc(CodeI);
@@ -293,6 +303,18 @@ var
       inc(CodeI)
     else
       R('Expected "'+x+'"');
+  end;
+
+  function IsNext(x:char):boolean;
+  begin
+    SkipWhiteSpace;
+    if (CodeI<=CodeL) and (Code[CodeI]=x) then
+     begin
+      inc(CodeI);
+      Result:=true;
+     end
+    else
+      Result:=false;
   end;
 
   function NextKeyword:boolean;
@@ -355,14 +377,11 @@ var
       R('Expected end of string quotes');
   end;
 
-const
-  MainLoop_NewMessage=0;
-  MainLoop_NestedMessage=1;
-  MainLoop_ContinueMessage=2;
 var
-  FieldName,TypeName,DefaultValue:string;
-  MainLoop,Quant,TypeNr:integer;
-  Msg,Msg1:TProtBufMessageDescriptor;
+  FieldName,TypeName,DefaultValue,OptionName:string;
+  Quant,TypeNr:integer;
+  First:boolean;
+  Msg,Msg1,MsgEnum:TProtBufMessageDescriptor;
 begin
   FUnitName:=ChangeFileExt(ExtractFileName(FilePath),'');
   LoadCode;
@@ -371,270 +390,472 @@ begin
   CodeI_EOL:=0;
   Line:=1;
   Keyword:='';
-  MainLoop:=MainLoop_NewMessage;
   Msg:=nil;
+  MsgEnum:=nil;
 
-  while (MainLoop<>MainLoop_NewMessage) or NextKeyword do
-   begin
+  while (CodeI<=CodeL) do
 
-    //root level
-    if (Msg=nil) and (MainLoop=MainLoop_NewMessage) then
-      while (CodeI<=CodeL) and (Keyword<>'message') and (Keyword<>'extend') do
-       begin
+    if (Msg=nil) and (MsgEnum=nil) then
+     begin
+
+      if NextKeyword then
+        if Keyword='syntax' then
+         begin
+          Expect('=');
+          NextStr;//expect 'proto3'? flag 'proto2'?
+          Expect(';');
+         end
+        else
         if Keyword='package' then
          begin
-          if FPackageName<>'' then R('Package name was already set.');
-          if NextKeyword then FPackageName:=Keyword else R('Package name expected;');
+          if FPackageName<>'' then R('Package name was already set');
+          if NextKeyword then FPackageName:=Keyword else R('Package name expected');
           Expect(';');
-          //TODO: separate descriptors!!!
          end
         else
         if Keyword='import' then
          begin
-          Parse(IncludeTrailingPathDelimiter(Values[pbpvImportPath])+
-            StringReplace(NextStr,'/','\',[rfReplaceAll]));
+          if NextKeyword then
+            if Keyword='public' then
+              //TODO
+            else
+            if Keyword='weak' then
+              //TODO
+            else
+              R('Unsupported import moidifier');
+          Parse(pd(Values[pbpvImportPath])+StringReplace(NextStr,'/','\',[rfReplaceAll]));
           Expect(';');
          end
         else
-          R('Unexpected keyword "'+Keyword+'"');
-        NextKeyword;//for remainder of loop
-       end;
-
-    if MainLoop=MainLoop_NewMessage then
-     begin
-      if (Keyword<>'message') and (Keyword<>'extend') then
-        R('Unexpected keyword "'+Keyword+'", expected "message" or "extend"');
-      //TODO: option
-      if Keyword='extend' then
-       begin
-        if not NextKeyword then R('Extend identifier expected');
-        Msg:=MsgDescByName(nil,Keyword);
-        if Msg=nil then
-          raise Exception.Create('Extend descriptor "'+Keyword+'" not found');
-        Msg.Extending:=true;
-        Msg.NextKey:=Msg.ExtensionsLo;//assert<>0
-        MainLoop:=MainLoop_ContinueMessage;
-        //TODO: inherit in code
-       end
-      else
-        if not NextKeyword then R('Message identifier expected');
-      Expect('{');
-     end;
-
-    if MainLoop<>MainLoop_ContinueMessage then
-     begin
-      Msg1:=Msg;
-      Msg:=TProtBufMessageDescriptor.Create(Keyword);
-      AddMsgDesc(Msg);
-      Msg.Parent:=Msg1;
-     end;
-
-    MainLoop:=MainLoop_NewMessage;
-
-    while (MainLoop=MainLoop_NewMessage) and NextKeyword do
-     begin
-
-      if Keyword='enum' then
-       begin
-        //enumeration
-        if not NextKeyword then R('Enum identifier expected');
-        Expect('{');
-        Msg1:=TProtBufEnumDescriptor.Create(Keyword);
-        InsertMsgDesc(Msg1,Msg);
-        Msg1.Parent:=Msg;
-        Msg1.NextKey:=0;
-        while NextKeyword do
+        if Keyword='option' then
          begin
-          if Keyword='option' then
+          if IsNext('(') then
            begin
-            if not NextKeyword then R('Enum option identifier expected');
-            if Keyword='allow_alias' then
+            if not NextKeyword then R('Option name expected');
+            OptionName:=Keyword;
+            while IsNext('.') do
              begin
-              SkipWhiteSpace;
-              if (CodeI<=CodeL) and (Code[CodeI]='=') then
-               begin
-                inc(CodeI);
-                if not NextKeyword then R('Enum option value expected');
-                if Keyword='true' then //TODO: allow_alias=true
-                else
-                if Keyword='false' then //TODO: allow_alias=false
-                else
-                  R('Unknown enum option value "'+Keyword+'"');
-               end
-              else
-                R('Assignment to "allow_alias" expected');
-             end
-            else
-              R('Unknown enum option "'+Keyword+'"');
+              if not NextKeyword then R('Option name expected');
+              OptionName:=OptionName+'.'+Keyword;
+             end;
+            Expect(')');
            end
           else
+           begin
+            if not NextKeyword then R('Option name expected');
+            OptionName:=Keyword;
+           end;
+          while IsNext('.') do
+           begin
+            if not NextKeyword then R('Option name expected');
+            OptionName:=OptionName+'.'+Keyword;
+           end;
+          Expect('=');
+          if not NextKeyword then Keyword:=NextStr;
+          Options.Add(OptionName+'='+Keyword);
+          Expect(';');
+         end
+        else
+        //TODO: 'service'
+        if Keyword='message' then
+         begin
+          if not NextKeyword then R('Message identifier expected');
+          Expect('{');
+          Msg:=TProtBufMessageDescriptor.Create(Keyword);
+          AddMsgDesc(Msg);
+         end
+        else
+        if Keyword='extend' then
+         begin
+          if not NextKeyword then R('Extend identifier expected');
+          Expect('{');
+          Msg:=MsgDescByName(nil,Keyword);
+          if Msg=nil then
+            raise Exception.Create('Extend descriptor "'+Keyword+'" not found');
+          Msg.Extending:=true;
+          Msg.NextKey:=Msg.ExtensionsLo;//assert<>0
+         end
+        else
+        if Keyword='enum' then
+         begin
+          if not NextKeyword then R('Enum identifier expected');
+          Expect('{');
+          MsgEnum:=TProtBufEnumDescriptor.Create(Keyword);
+          InsertMsgDesc(MsgEnum,nil);
+          //MsgEnum.Parent:=Msg;
+          MsgEnum.NextKey:=0;
+         end
+        else
+          R('Unexpected keyword "'+Keyword+'"')
+      else
+        if CodeI<=CodeL then
+          R('Unexpected non-keyword');
+        //else EOF
+
+     end
+    else
+
+    if MsgEnum=nil then //Msg<>nil
+     begin
+
+      if NextKeyword then
+        if Keyword='enum' then
+         begin
+          if not NextKeyword then R('Enum identifier expected');
+          Expect('{');
+          MsgEnum:=TProtBufEnumDescriptor.Create(Keyword);
+          InsertMsgDesc(MsgEnum,Msg);
+          MsgEnum.Parent:=Msg;
+          MsgEnum.NextKey:=0;
+         end
+        else
+        if Keyword='message' then
+         begin
+          //nested message
+          if not NextKeyword then R('Message identifier expected');
+          Expect('{');
+          //push message
+          Msg1:=Msg;
+          Msg:=TProtBufMessageDescriptor.Create(Keyword);
+          AddMsgDesc(Msg);
+          Msg.Parent:=Msg1;
+         end
+        else
+        if Keyword='extensions' then //TODO: proto2 only
+         begin
+          //extensions
+          if (Msg.ExtensionsLo<>0) then R('Extensions range already set');
+          if Msg.Extending then R('Can''t set extensions range when already extending');
+          Msg.ExtensionsLo:=NextInt;
+          if not NextKeyword then R('Expected "to"');
+          Msg.ExtensionsHi:=NextInt;
+          if (Msg.ExtensionsLo=0) or (Msg.ExtensionsHi=0)
+            or (Msg.ExtensionsHi<Msg.ExtensionsLo) then
+              R('Invalid extensions range');
+          Expect(';');
+         end
+        else
+        if Keyword='option' then
+         begin
+          if IsNext('(') then
+           begin
+            if not NextKeyword then R('Option name expected');
+            OptionName:=Keyword;
+            while IsNext('.') do
+             begin
+              if not NextKeyword then R('Option name expected');
+              OptionName:=OptionName+'.'+Keyword;
+             end;
+            Expect(')');
+           end
+          else
+           begin
+            if not NextKeyword then R('Option name expected');
+            OptionName:=Keyword;
+           end;
+          while IsNext('.') do
+           begin
+            if not NextKeyword then R('Option name expected');
+            OptionName:=OptionName+'.'+Keyword;
+           end;
+          Expect('=');
+          if not NextKeyword then Keyword:=NextStr;
+          //TODO: Msg.OptionAdd(OptionName,Keyword);
+          Expect(';');
+         end
+        else
+        if Keyword='reserved' then
+         begin
+          //TODO:
+          if NextKeyword then //if (CodeI<=CodeL) and (Code[CodeI] in ['0'..'9']) then
+           begin
+            First:=true;
+            while First or IsNext(',') do
+             begin
+              if First then First:=false;
+              if NextKeyword then
+               begin
+                if Keyword='to' then NextInt//TODO:
+                else ;//
+               end;
+              //Keyword StrToInt?
+             end;
+           end
+          else
+           begin
+            NextStr;
+            while IsNext(',') do NextStr;
+           end;
+          Expect(';');
+         end
+        else
+        if Keyword='oneof' then
+         begin
+          if Msg.OneOfName<>'' then R('Nested oneof not allowed');
+          if not NextKeyword then R('Message identifier expected');
+          Expect('{');
+          Msg.OneOfName:=Keyword;//see below
+         end
+        else
+         begin
+          //field
+          if Keyword='required' then Quant:=Quant_Required else //TODO: proto2 only
+          if Keyword='optional' then Quant:=Quant_Optional else //TODO: proto2 only
+          if Keyword='repeated' then Quant:=Quant_Repeated else
+            Quant:=0;
+
+          if Quant<>0 then
+            if not NextKeyword then R('Type identifier expected');
+          DefaultValue:='';
+          if Keyword='map' then
+           begin
+            if Quant<>0 then R('Quantifiers not allowed on maps');
+            Expect('<');
+            if not NextKeyword then R('Map key type expected');
+            TypeNr:=0;
+            case Keyword[1] of
+              'b':
+                if Keyword='bool' then TypeNr:=TypeNr_bool
+                else
+                ;
+              'f':
+                if Keyword='fixed32' then TypeNr:=TypeNr_fixed32
+                else
+                if Keyword='fixed64' then TypeNr:=TypeNr_fixed64
+                else
+                ;
+              'i':
+                if Keyword='int32' then TypeNr:=TypeNr_int32
+                else
+                if Keyword='int64' then TypeNr:=TypeNr_int64
+                ;
+              's':
+                if Keyword='string' then TypeNr:=TypeNr_string
+                else
+                if Keyword='sint32' then TypeNr:=TypeNr_sint32
+                else
+                if Keyword='sint64' then TypeNr:=TypeNr_sint64
+                else
+                if Keyword='sfixed32' then TypeNr:=TypeNr_sfixed32
+                else
+                if Keyword='sfixed64' then TypeNr:=TypeNr_sfixed64
+                else
+                ;
+              'u':
+                if Keyword='uint32' then TypeNr:=TypeNr_uint32
+                else
+                if Keyword='uint64' then TypeNr:=TypeNr_uint64
+                else
+                ;
+
+              //else ;
+            end;
+            if TypeNr=0 then R('Invalud map key value type');
+            Expect(',');
+            if not NextKeyword then R('Map value type expected');
+            TypeName:=IntToStr(TypeNr)+':'+Keyword;
+            Expect('>');
+           end
+          else
+           begin
+            TypeName:='';
+            TypeNr:=0;
+            case Keyword[1] of
+              'b':
+                if Keyword='bool' then TypeNr:=TypeNr_bool
+                else
+                if Keyword='bytes' then TypeNr:=TypeNr_bytes
+                else
+                ;
+              'd':
+                if Keyword='double' then TypeNr:=TypeNr_double
+                else
+                ;
+              'f':
+                if Keyword='float' then TypeNr:=TypeNr_float
+                else
+                if Keyword='fixed32' then TypeNr:=TypeNr_fixed32
+                else
+                if Keyword='fixed64' then TypeNr:=TypeNr_fixed64
+                else
+                ;
+              'i':
+                if Keyword='int32' then TypeNr:=TypeNr_int32
+                else
+                if Keyword='int64' then TypeNr:=TypeNr_int64
+                ;
+              's':
+                if Keyword='string' then TypeNr:=TypeNr_string
+                else
+                if Keyword='sint32' then TypeNr:=TypeNr_sint32
+                else
+                if Keyword='sint64' then TypeNr:=TypeNr_sint64
+                else
+                if Keyword='sfixed32' then TypeNr:=TypeNr_sfixed32
+                else
+                if Keyword='sfixed64' then TypeNr:=TypeNr_sfixed64
+                else
+                if Keyword='single' then TypeNr:=TypeNr_float
+                else
+                ;
+              'u':
+                if Keyword='uint32' then TypeNr:=TypeNr_uint32
+                else
+                if Keyword='uint64' then TypeNr:=TypeNr_uint64
+                else
+                ;
+
+              //else ;
+            end;
+            if TypeNr=0 then
+             begin
+              TypeName:=Keyword;
+              TypeNr:=TypeNr__typeByName;
+              //lookup here? see build output script
+             end;
+
+            if (TypeNr=TypeNr_bytes) and (Quant>=Quant_Repeated) then
+              R('"repeated bytes" not supported');
+           end;
+
+          if NextKeyword then FieldName:=Keyword else R('Identifier expected');
+          while TypeNr<>0 do
+           begin
+            SkipWhiteSpace;
+            if CodeI<=CodeL then
+             begin
+              inc(CodeI);
+              case Code[CodeI-1] of
+                ';':
+                 begin
+
+                  if (Msg.NextKey>=kFirstReservedNumber)
+                    and (Msg.NextKey<=kLastReservedNumber) then
+                    R('Reserved key value '+IntToStr(Msg.NextKey));
+                  if Msg.Extending and ((Msg.NextKey<Msg.ExtensionsLo) or
+                    (Msg.NextKey>Msg.ExtensionsHi)) then
+                    R('Key value outside of extensions range '+IntToStr(Msg.NextKey));
+
+                  Msg.AddMember(Quant,TypeNr,FieldName,TypeName,DefaultValue);
+
+                  TypeNr:=0;
+                 end;
+                '=':
+                  Msg.NextKey:=NextInt;
+                '[':
+                 begin
+                  NextKeyword;
+                  Expect('=');
+                  if (Keyword='default') and (Quant=Quant_Optional) then
+                    if NextKeyword then
+                      DefaultValue:=Keyword
+                    else
+                     R('Default value expected')
+                  else
+                  if (Keyword='packed')
+                    and (Quant in [Quant_Repeated,Quant_Repeated_Packed]) then
+                    if NextKeyword then
+                      if Keyword='true' then Quant:=Quant_Repeated_Packed else
+                        if Keyword='false' then Quant:=Quant_Repeated else
+                          R('Unknown packed value "'+Keyword+'"')
+                    else R('Packed value expected')
+                  else
+                    R('Unknown modifier "'+Keyword+'"');
+                  Expect(']');
+                 end;
+                else R('Expected ";" or "=" or "["');
+              end;
+             end;
+           end;
+        end
+      else
+       begin
+        Expect('}');
+        if Msg.OneOfName<>'' then
+          Msg.OneOfName:='' //continue with message
+        else
+          Msg:=Msg.Parent;//pop message
+       end;
+     end
+
+    else //MsgEnum<>nil
+     begin
+      if NextKeyword then
+       begin
+        if Keyword='option' then
+         begin
+          if not NextKeyword then R('Enum option identifier expected');
+          if Keyword='allow_alias' then
            begin
             SkipWhiteSpace;
             if (CodeI<=CodeL) and (Code[CodeI]='=') then
              begin
               inc(CodeI);
-              Msg1.NextKey:=NextInt;
-             end;
-            Msg1.AddMember(0,0,Keyword,'','');
+              if not NextKeyword then R('Enum option value expected');
+              if Keyword='true' then //TODO: allow_alias=true
+              else
+              if Keyword='false' then //TODO: allow_alias=false
+              else
+                R('Unknown enum option value "'+Keyword+'"');
+             end
+            else
+              R('Assignment to "allow_alias" expected');
+           end
+          else
+            R('Unknown enum option "'+Keyword+'"');
+         end
+        else
+         begin
+          SkipWhiteSpace;
+          if (CodeI<=CodeL) and (Code[CodeI]='=') then
+           begin
+            inc(CodeI);
+            MsgEnum.NextKey:=NextInt;
            end;
-          Expect(';');
+          MsgEnum.AddMember(0,0,Keyword,'','');
          end;
-        Expect('}');
-       end
-      else
-      if Keyword='message' then
-       begin
-        //nested message
-        if not NextKeyword then R('Message identifier expected');
-        Expect('{');
-        //push message
-        MainLoop:=MainLoop_NestedMessage;
-       end
-      else
-      if Keyword='extensions' then
-       begin
-        //extensions
-        if (Msg.ExtensionsLo<>0) then R('Extensions range already set');
-        if Msg.Extending then R('Can''t set extensions range when already extending');
-        Msg.ExtensionsLo:=NextInt;
-        if not NextKeyword then R('Expected "to"');
-        Msg.ExtensionsHi:=NextInt;
-        if (Msg.ExtensionsLo=0) or (Msg.ExtensionsHi=0)
-          or (Msg.ExtensionsHi<Msg.ExtensionsLo) then
-            R('Invalid extensions range');
+        if IsNext('[') then
+         begin
+          //option(s)
+          First:=true;
+          while First or IsNext(',') do
+           begin
+            if First then First:=false;
+            if IsNext('(') then
+             begin
+              if not NextKeyword then R('Option name expected');
+              OptionName:=Keyword;
+              while IsNext('.') do
+               begin
+                if not NextKeyword then R('Option name expected');
+                OptionName:=OptionName+'.'+Keyword;
+               end;
+              Expect(')');
+             end
+            else
+             begin
+              if not NextKeyword then R('Option name expected');
+              OptionName:=Keyword;
+             end;
+            while IsNext('.') do
+             begin
+              if not NextKeyword then R('Option name expected');
+              OptionName:=OptionName+'.'+Keyword;
+             end;
+            Expect('=');
+            //TODO:OptionName+'='+
+            NextStr;
+           end;
+          Expect(']');
+         end;
         Expect(';');
        end
       else
-       begin
-        if Keyword='required' then Quant:=Quant_Required else
-        if Keyword='optional' then Quant:=Quant_Optional else
-        if Keyword='repeated' then Quant:=Quant_Repeated else
-         begin
-          R('Unknown field quantifier "'+Keyword+'"');
-          Quant:=0;//counter warning
-         end;
-
-        if not NextKeyword then R('Type identifier expected');
-        DefaultValue:='';
-        TypeName:='';
-        TypeNr:=0;
-        case Keyword[1] of
-          'b':
-            if Keyword='bool' then TypeNr:=TypeNr_bool
-            else
-            if Keyword='bytes' then TypeNr:=TypeNr_bytes
-            else
-            ;
-          'd':
-            if Keyword='double' then TypeNr:=TypeNr_double
-            else
-            ;
-          'f':
-            if Keyword='float' then TypeNr:=TypeNr_float
-            else
-            if Keyword='fixed32' then TypeNr:=TypeNr_fixed32
-            else
-            if Keyword='fixed64' then TypeNr:=TypeNr_fixed64
-            else
-            ;
-          'i':
-            if Keyword='int32' then TypeNr:=TypeNr_int32
-            else
-            if Keyword='int64' then TypeNr:=TypeNr_int64
-            ;
-          's':
-            if Keyword='string' then TypeNr:=TypeNr_string
-            else
-            if Keyword='sint32' then TypeNr:=TypeNr_sint32
-            else
-            if Keyword='sing64' then TypeNr:=TypeNr_sint64
-            else
-            if Keyword='sfixed32' then TypeNr:=TypeNr_sfixed32
-            else
-            if Keyword='sfixed64' then TypeNr:=TypeNr_sfixed64
-            else
-            if Keyword='single' then TypeNr:=TypeNr_float
-            else
-            ;
-          'u':
-            if Keyword='uint32' then TypeNr:=TypeNr_uint32
-            else
-            if Keyword='uint64' then TypeNr:=TypeNr_uint64
-            else
-            ;
-
-          //else ;
-        end;
-        if TypeNr=0 then
-         begin
-          TypeName:=Keyword;
-          TypeNr:=TypeNr__typeByName;
-          //lookup here? see build output script
-         end;
-
-        if (TypeNr=TypeNr_bytes) and (Quant>=Quant_Repeated) then
-          R('"repeated bytes" not supported');
-
-        if NextKeyword then FieldName:=Keyword else R('Identifier expected');
-        while TypeNr<>0 do
-         begin
-          SkipWhiteSpace;
-          if CodeI<=CodeL then
-           begin
-            inc(CodeI);
-            case Code[CodeI-1] of
-              ';':
-               begin
-
-                if (Msg.NextKey>=kFirstReservedNumber)
-                  and (Msg.NextKey<=kLastReservedNumber) then
-                  R('Reserved key value '+IntToStr(Msg.NextKey));
-                if Msg.Extending and ((Msg.NextKey<Msg.ExtensionsLo) or
-                  (Msg.NextKey>Msg.ExtensionsHi)) then
-                  R('Key value outside of extensions range '+IntToStr(Msg.NextKey));
-
-                Msg.AddMember(Quant,TypeNr,FieldName,TypeName,DefaultValue);
-
-                TypeNr:=0;
-               end;
-              '=':
-                Msg.NextKey:=NextInt;
-              '[':
-               begin
-                NextKeyword;
-                Expect('=');
-                if (Keyword='default') and (Quant=Quant_Optional) then
-                  if NextKeyword then
-                    DefaultValue:=Keyword
-                  else
-                   R('Default value expected')
-                else
-                if (Keyword='packed')
-                  and (Quant in [Quant_Repeated,Quant_Repeated_Packed]) then
-                  if NextKeyword then
-                    if Keyword='true' then Quant:=Quant_Repeated_Packed else
-                      if Keyword='false' then Quant:=Quant_Repeated else
-                        R('Unknown packed value "'+Keyword+'"')
-                  else R('Packed value expected')
-                else
-                  R('Unknown modifier "'+Keyword+'"');
-                Expect(']');
-               end;
-              else R('Expected ";" or "=" or "["');
-            end;
-           end;
-         end;
-      end;
-
+        if IsNext('}') then
+          MsgEnum:=nil //continue
+        else
+          R('Unexpected syntax');
      end;
-    if MainLoop=MainLoop_NewMessage then 
-     begin
-      Expect('}');
-      //pop message
-      Msg:=Msg.Parent;
-      if Msg<>nil then MainLoop:=MainLoop_ContinueMessage;
-     end;
-   end;
 end;
 
 function TProtocolBufferParser.GenerateUnit(
@@ -644,6 +865,7 @@ var
   v:TProtocolBufferParserValue;
   f:TProtocolBufferParserFlag;
 begin
+  //TODO: Flags from options?
   if Values[pbpvUnitName]<>'' then FUnitName:=Values[pbpvUnitName];
   Result:='unit '+FUnitName+';'#13#10#13#10+
     '// ATTENTION:'#13#10+
@@ -795,6 +1017,7 @@ begin
   FMembersCount:=0;
   Parent:=nil;
   NextKey:=1;
+  OneOfName:='';//used by parser only
   Forwarded:=false;
   Extending:=false;
   ExtensionsLo:=0;
@@ -822,6 +1045,7 @@ begin
   FMembers[FMembersIndex].Name:=Name;
   FMembers[FMembersIndex].TypeName:=TypeName;
   FMembers[FMembersIndex].DefaultValue:=DefaultValue;
+  FMembers[FMembersIndex].OneOfName:=OneOfName;
   inc(FMembersIndex);
   inc(NextKey);
 end;
@@ -892,6 +1116,7 @@ begin
            end;
          end;
        end;
+      TypeNr__map:FMembers[i].PascalType:='TMap<'+FMembers[i].TypeName+'>';//TODO:
       else FMembers[i].PascalType:='???';
     end;
     if (FMembers[i].Quant=Quant_Optional) and (FMembers[i].DefaultValue='') then

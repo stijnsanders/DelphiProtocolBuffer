@@ -2,7 +2,7 @@
 
 DelphiProtocolBuffer: dpbp.dpr
 
-Copyright 2014 Stijn Sanders
+Copyright 2014-2016 Stijn Sanders
 Made available under terms described in file "LICENSE"
 https://github.com/stijnsanders/DelphiProtocolBuffer
 
