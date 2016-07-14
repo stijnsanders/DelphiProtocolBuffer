@@ -19,7 +19,7 @@ interface
 uses Classes;
 
 type
-  TProtocolBufferKey = 0..536870911;//cardinal, uint23
+  TProtocolBufferKey = 0..$1FFFFFFF;//cardinal, uint23
 
   TDynArrayOfBytes = array of byte;
 

@@ -280,8 +280,6 @@ var
         while (CodeI<=CodeL)
           and (Code[CodeI]<>#13) and (Code[CodeI]<>#10) do
           inc(CodeI);
-        inc(CodeI);
-        b:=true;
        end;
      end;
   end;
@@ -527,8 +525,14 @@ begin
           if (Msg.ExtensionsLo<>0) then R('Extensions range already set');
           if Msg.Extending then R('Can''t set extensions range when already extending');
           Msg.ExtensionsLo:=NextInt;
-          if not NextKeyword then R('Expected "to"');
-          Msg.ExtensionsHi:=NextInt;
+          if not(NextKeyword) or (Keyword<>'to') then R('Expected "to"');
+          if NextKeyword then
+            if Keyword='max' then
+              Msg.ExtensionsHi:=$1FFFFFFF//int23
+            else
+              R('Unsupported range syntax')
+          else
+            Msg.ExtensionsHi:=NextInt;
           if (Msg.ExtensionsLo=0) or (Msg.ExtensionsHi=0)
             or (Msg.ExtensionsHi<Msg.ExtensionsLo) then
               R('Invalid extensions range');
@@ -852,7 +856,10 @@ begin
        end
       else
         if IsNext('}') then
-          MsgEnum:=nil //continue
+         begin
+          MsgEnum:=nil; //continue
+          if Msg<>nil then IsNext(';');
+         end
         else
           R('Unexpected syntax');
      end;
