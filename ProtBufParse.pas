@@ -530,6 +530,8 @@ begin
             if Keyword='max' then
               Msg.ExtensionsHi:=$1FFFFFFF//int23
             else
+            if TryStrToInt(Keyword,Msg.ExtensionsHi) then
+            else
               R('Unsupported range syntax')
           else
             Msg.ExtensionsHi:=NextInt;
